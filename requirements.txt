@@ -1,0 +1,2 @@
+git+https://github.com/nikdoof/python-ts3/#egg=python-ts3
+prometheus_client>=0.7.1
