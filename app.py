@@ -61,7 +61,7 @@ class Teamspeak3MetricService:
         self.password = password
         self.configure_via_environment_variables()
 
-        print('TS3 SETTINGS:\nHost: %s\nPort: %s\nUsername: %s\nPassword: %s' % (self.host, self.port, self.username, self.password))
+        print('TS3 SETTINGS:\nHost: %s\nPort: %s\nUsername: %s\nPassword: *censored*' % (self.host, self.port, self.username))
 
         for teamspeak_metric_name in METRICS_NAMES:
             PROMETHEUS_METRICS[teamspeak_metric_name] = Gauge(METRICS_PREFIX + teamspeak_metric_name, METRICS_PREFIX + teamspeak_metric_name, ['virtualserver_name'])
