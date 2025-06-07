@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    container_name: teamspeak-prometheus
+    ports:
+      - "8000:8000"
+    environment:
+      - TEAMSPEAK_HOST=10.115.15.25
+      - TEAMSPEAK_PASSWORD=Dd112211
+    restart: always
