@@ -136,11 +136,14 @@ class FakeTs3Server:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--password', default='fake-password')
     parser.add_argument('--port', type=int, default=0, help='0 picks a free port')
     args = parser.parse_args()
 
-    server = FakeTs3Server(password=args.password, port=args.port).start()
+    server = FakeTs3Server(
+        password=args.password, host=args.host, port=args.port
+    ).start()
     print('Fake TS3 ServerQuery listening on %s:%d' % (server.host, server.port))
     print('Password: %s' % args.password)
     try:
