@@ -2,6 +2,8 @@
 
 PYTHON ?= python3
 VENV := .venv
+# Extra flags for run-fake, e.g. RUN_FAKE_ARGS="--iterations 2 --interval 0.2"
+RUN_FAKE_ARGS ?=
 BIN := $(VENV)/bin
 
 .PHONY: help setup lint format check test test-smoke run-fake docker-build clean
@@ -39,7 +41,7 @@ check: lint test
 	$(BIN)/ruff format --check .
 
 run-fake: $(BIN)/python
-	$(BIN)/python tests/fake_ts3_server.py --serve
+	$(BIN)/python -m tests.exporter_harness $(RUN_FAKE_ARGS)
 
 docker-build:
 	docker build -t teamspeak-prometheus:dev .

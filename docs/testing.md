@@ -10,7 +10,14 @@ make run-fake     # run the exporter locally and scrape it by hand
 ```
 
 `make run-fake` starts a fake TeamSpeak ServerQuery interface and the real
-exporter against it, then prints the `curl` command to scrape.
+exporter against it, then prints the `curl` command to scrape. It listens on
+the usual port 8000; pass extra flags through `RUN_FAKE_ARGS` if that port is
+taken or you want it to stop by itself:
+
+```bash
+make run-fake RUN_FAKE_ARGS="--metricsport 8231"
+make run-fake RUN_FAKE_ARGS="--iterations 2 --interval 0.2"   # what CI runs
+```
 
 ## Layout
 

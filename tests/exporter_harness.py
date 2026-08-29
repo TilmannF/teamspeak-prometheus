@@ -45,7 +45,14 @@ def run(
 
     registry = CollectorRegistry()
     gauges = app.build_gauges(registry)
-    start_http_server(config.metrics_port, registry=registry)
+    try:
+        start_http_server(config.metrics_port, registry=registry)
+    except OSError as err:
+        raise SystemExit(
+            'Could not listen on port %d (%s).\n'
+            'Something else is using it -- pass --metricsport to pick another.'
+            % (config.metrics_port, err)
+        ) from err
     print('Started metrics endpoint on port %s' % config.metrics_port)
 
     service = app.Teamspeak3MetricService(config, gauges, client_factory=QueryClient)
