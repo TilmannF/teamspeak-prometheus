@@ -1,6 +1,8 @@
-# nikdoof/python-ts3 is archived (last commit 2015) and imports telnetlib,
-# which was removed in Python 3.13 -- it installs on Python 3.12 and older
-# only. Pinned to a commit so builds are reproducible. Replacing it is the
-# first item in docs/modernization-backlog.md.
-git+https://github.com/nikdoof/python-ts3@54cd134f79abf9a87d7e753aa012550ef0910668#egg=python-ts3
+# nikdoof/python-ts3 is archived (last commit 2015) and imports telnetlib, which
+# was removed in Python 3.13, so it can only be installed on 3.12 and older. The
+# marker keeps `pip install -r requirements.txt` working on newer interpreters:
+# the exporter itself cannot run there, but the whole test suite can, because it
+# never imports ts3 (see docs/testing.md). Pinned to a commit for reproducible
+# builds. Replacing it is item 1 in docs/modernization-backlog.md.
+python-ts3 @ git+https://github.com/nikdoof/python-ts3@54cd134f79abf9a87d7e753aa012550ef0910668 ; python_version < "3.13"
 prometheus_client>=0.7.1,<1.0
