@@ -37,7 +37,7 @@ Modules MUST NOT perform work at import time.
 Argument parsing, network connections, server startup, and loops MUST live inside functions, behind:
 
 ```python
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())
 ```
 
