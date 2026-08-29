@@ -1,2 +1,6 @@
-git+https://github.com/nikdoof/python-ts3/#egg=python-ts3
-prometheus_client>=0.7.1
+# nikdoof/python-ts3 is archived (last commit 2015) and imports telnetlib,
+# which was removed in Python 3.13 -- it installs on Python 3.12 and older
+# only. Pinned to a commit so builds are reproducible. Replacing it is the
+# first item in docs/modernization-backlog.md.
+git+https://github.com/nikdoof/python-ts3@54cd134f79abf9a87d7e753aa012550ef0910668#egg=python-ts3
+prometheus_client>=0.7.1,<1.0
