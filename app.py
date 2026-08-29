@@ -1,12 +1,32 @@
-import ts3
-import time
-import os
+"""TeamSpeak 3 ServerQuery metrics exporter for Prometheus.
+
+The module is importable without side effects: argument parsing, the metrics
+HTTP server, and the polling loop all live behind ``main()``. See AGENTS.md.
+"""
+
+from __future__ import annotations
+
 import argparse
-from prometheus_client import start_http_server, Counter, Gauge
+import os
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+from prometheus_client import REGISTRY, CollectorRegistry, Gauge, start_http_server
 
 READ_INTERVAL_IN_SECONDS = 5
 METRICS_PREFIX = 'teamspeak_'
+VIRTUALSERVER_LABEL = 'virtualserver_name'
 
+DEFAULT_TS3_HOST = 'localhost'
+DEFAULT_TS3_PORT = 10011
+DEFAULT_TS3_USERNAME = 'serveradmin'
+DEFAULT_TS3_PASSWORD = ''
+DEFAULT_METRICS_PORT = 8000
+
+# Public API. Renaming or removing an entry breaks every dashboard and alerting
+# rule built on this exporter. See AGENTS.md, "The Metric Contract".
 METRICS_NAMES = [
     'connection_bandwidth_received_last_minute_total',
     'connection_bandwidth_received_last_second_total',
@@ -48,92 +68,228 @@ METRICS_NAMES = [
     'virtualserver_total_packetloss_speech',
     'virtualserver_total_packetloss_total',
     'virtualserver_total_ping',
-    'virtualserver_uptime'
+    'virtualserver_uptime',
 ]
 
-PROMETHEUS_METRICS = {}
+
+class ExporterError(Exception):
+    """Base class for errors raised by this exporter."""
+
+
+class LoginFailed(ExporterError):
+    """The ServerQuery login was rejected."""
+
+
+class Ts3Client(Protocol):
+    """The subset of the TeamSpeak client surface this exporter uses."""
+
+    def login(self, username: str, password: str) -> bool: ...
+
+    def serverlist(self) -> Any: ...
+
+    def use(self, virtualserver_id: Any) -> Any: ...
+
+    def send_command(self, command: str) -> Any: ...
+
+    def disconnect(self) -> None: ...
+
+
+ClientFactory = Callable[[str, int], Ts3Client]
+
+
+@dataclass(frozen=True)
+class Config:
+    """Resolved exporter configuration."""
+
+    host: str
+    port: int
+    username: str
+    password: str
+    metrics_port: int
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--ts3host',
+        help='Hostname or ip address of TS3 server',
+        type=str,
+        default=DEFAULT_TS3_HOST,
+    )
+    parser.add_argument(
+        '--ts3port', help='Port of TS3 server', type=int, default=DEFAULT_TS3_PORT
+    )
+    parser.add_argument(
+        '--ts3username',
+        help='ServerQuery username of TS3 server',
+        type=str,
+        default=DEFAULT_TS3_USERNAME,
+    )
+    parser.add_argument(
+        '--ts3password',
+        help='ServerQuery password of TS3 server',
+        type=str,
+        default=DEFAULT_TS3_PASSWORD,
+    )
+    parser.add_argument(
+        '--metricsport',
+        help='Port on which this service exposes the metrics',
+        type=int,
+        default=DEFAULT_METRICS_PORT,
+    )
+    return parser.parse_args(argv)
+
+
+def resolve_config(args: argparse.Namespace, env: Mapping[str, str]) -> Config:
+    """Combine parsed arguments with the environment.
+
+    Environment variables win over command-line arguments, which is the
+    behavior this exporter has always had.
+    """
+
+    return Config(
+        host=env.get('TEAMSPEAK_HOST', args.ts3host),
+        port=_port('TEAMSPEAK_PORT', env.get('TEAMSPEAK_PORT'), args.ts3port),
+        username=env.get('TEAMSPEAK_USERNAME', args.ts3username),
+        password=env.get('TEAMSPEAK_PASSWORD', args.ts3password),
+        metrics_port=_port('METRICS_PORT', env.get('METRICS_PORT'), args.metricsport),
+    )
+
+
+def _port(name: str, value: str | None, fallback: int) -> int:
+    if value is None:
+        return fallback
+    try:
+        return int(value)
+    except ValueError as err:
+        raise ExporterError(f'{name} must be a port number, got {value!r}') from err
+
+
+def describe_settings(config: Config) -> str:
+    """Render the startup banner. The password is never included."""
+
+    return 'TS3 SETTINGS:\nHost: %s\nPort: %s\nUsername: %s\nPassword: *censored*' % (
+        config.host,
+        config.port,
+        config.username,
+    )
+
+
+def build_gauges(registry: CollectorRegistry) -> dict[str, Gauge]:
+    """Create one labelled gauge per TeamSpeak metric.
+
+    The registry is explicit because building twice against the global default
+    registry raises ``Duplicated timeseries``, which would break the tests.
+    """
+
+    gauges: dict[str, Gauge] = {}
+    for teamspeak_metric_name in METRICS_NAMES:
+        gauges[teamspeak_metric_name] = Gauge(
+            METRICS_PREFIX + teamspeak_metric_name,
+            METRICS_PREFIX + teamspeak_metric_name,
+            [VIRTUALSERVER_LABEL],
+            registry=registry,
+        )
+        print('Initialized gauge %s' % teamspeak_metric_name)
+    return gauges
+
+
+def update_gauges(gauges: Mapping[str, Gauge], serverinfo: Mapping[str, Any]) -> None:
+    """Copy one ``serverinfo`` response into the gauges, unconverted."""
+
+    virtualserver_name = serverinfo['virtualserver_name']
+    for teamspeak_metric_name in METRICS_NAMES:
+        gauges[teamspeak_metric_name].labels(
+            **{VIRTUALSERVER_LABEL: virtualserver_name}
+        ).set(serverinfo[teamspeak_metric_name])
+
+
+def default_client_factory(host: str, port: int) -> Ts3Client:
+    # Imported lazily so this module stays importable — and testable — without
+    # the archived `ts3` package installed. See docs/modernization-backlog.md.
+    import ts3
+
+    return ts3.TS3Server(host, port)
+
 
 class Teamspeak3MetricService:
-    def __init__(self, host, port, username, password):
-        self.host = host
-        self.port = port
-        self.username = username
-        self.password = password
-        self.configure_via_environment_variables()
+    """Reads ``serverinfo`` for every virtualserver and updates the gauges."""
 
-        print('TS3 SETTINGS:\nHost: %s\nPort: %s\nUsername: %s\nPassword: *censored*' % (self.host, self.port, self.username))
+    def __init__(
+        self,
+        config: Config,
+        gauges: Mapping[str, Gauge],
+        client_factory: ClientFactory = default_client_factory,
+    ) -> None:
+        self.config = config
+        self.gauges = gauges
+        self.client_factory = client_factory
+        self.client: Ts3Client | None = None
 
-        for teamspeak_metric_name in METRICS_NAMES:
-            PROMETHEUS_METRICS[teamspeak_metric_name] = Gauge(METRICS_PREFIX + teamspeak_metric_name, METRICS_PREFIX + teamspeak_metric_name, ['virtualserver_name'])
-            print('Initialized gauge %s' % teamspeak_metric_name)
+    def connect(self) -> None:
+        self.client = self.client_factory(self.config.host, self.config.port)
+        if not self.client.login(self.config.username, self.config.password):
+            raise LoginFailed('Login not successful')
 
-    def configure_via_environment_variables(self):
-        if os.environ.get('TEAMSPEAK_HOST') is not None:
-            self.host = os.environ.get('TEAMSPEAK_HOST')
+    def read(self) -> None:
+        if self.client is None:
+            raise ExporterError('read() called before connect()')
 
-        if os.environ.get('TEAMSPEAK_PORT') is not None:
-            self.port = os.environ.get('TEAMSPEAK_PORT')
-        
-        if os.environ.get('TEAMSPEAK_USERNAME') is not None:
-            self.username = os.environ.get('TEAMSPEAK_USERNAME')
-        
-        if os.environ.get('TEAMSPEAK_PASSWORD') is not None:
-            self.password = os.environ.get('TEAMSPEAK_PASSWORD')
-
-    def connect(self):
-        self.serverQueryService = ts3.TS3Server(self.host, self.port)
-        isLoginSuccessful = self.serverQueryService.login(self.username, self.password)
-
-        if not isLoginSuccessful:
-            raise()
-            print('Login not successful')
-            exit(1)
-
-    def read(self):
-        serverlistResponse = self.serverQueryService.serverlist()
-        if not serverlistResponse.response['msg'] == 'ok':
-            print('Error retrieving serverlist: %s' % serverlistResponse.response['msg'])
+        serverlist_response = self.client.serverlist()
+        if serverlist_response.response['msg'] != 'ok':
+            print(
+                'Error retrieving serverlist: %s' % serverlist_response.response['msg']
+            )
             return
 
-        servers = serverlistResponse.data
-
-        for server in servers:
-            virtualserver_id = server.get('virtualserver_id')
-            self.serverQueryService.use(virtualserver_id)
-            serverinfoResponse = self.serverQueryService.send_command('serverinfo')
-            if not serverinfoResponse.response['msg'] == 'ok':
-                print('Error retrieving serverinfo: %s' % serverinfoResponse.response['msg'])
+        for server in serverlist_response.data:
+            self.client.use(server.get('virtualserver_id'))
+            serverinfo_response = self.client.send_command('serverinfo')
+            if serverinfo_response.response['msg'] != 'ok':
+                print(
+                    'Error retrieving serverinfo: %s'
+                    % serverinfo_response.response['msg']
+                )
                 return
 
-            serverinfo = serverinfoResponse.data[0]
-            virtualserver_name = serverinfo['virtualserver_name']
-            
-            for teamspeak_metric_name in METRICS_NAMES:
-                PROMETHEUS_METRICS[teamspeak_metric_name].labels(virtualserver_name=virtualserver_name).set(serverinfo[teamspeak_metric_name])
-    
-    def disconnect(self):
-        self.serverQueryService.disconnect()
+            update_gauges(self.gauges, serverinfo_response.data[0])
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--ts3host', help='Hostname or ip address of TS3 server', type=str, default='localhost')
-parser.add_argument('--ts3port', help='Port of TS3 server', type=int, default=10011)
-parser.add_argument('--ts3username', help='ServerQuery username of TS3 server', type=str, default='serveradmin')
-parser.add_argument('--ts3password', help='ServerQuery password of TS3 server', type=str, default='')
-parser.add_argument('--metricsport', help='Port on which this service exposes the metrics', type=int, default=8000)
-args = parser.parse_args()
+    def disconnect(self) -> None:
+        if self.client is None:
+            return
+        self.client.disconnect()
+        self.client = None
 
-if os.environ.get('METRICS_PORT') is None:
-    metrics_port = args.metricsport
-else:
-    metrics_port = os.environ.get('METRICS_PORT')
 
-ts3Service = Teamspeak3MetricService(host=args.ts3host, port=args.ts3port, username=args.ts3username, password=args.ts3password)
-ts3Service.configure_via_environment_variables()
-start_http_server(metrics_port)
-print('Started metrics endpoint on port %s' % metrics_port)
-while True:
-    print('Fetching metrics')
-    ts3Service.connect()
-    ts3Service.read()
-    ts3Service.disconnect()
-    time.sleep(READ_INTERVAL_IN_SECONDS)
+def poll_forever(
+    service: Teamspeak3MetricService,
+    interval_in_seconds: float = READ_INTERVAL_IN_SECONDS,
+    iterations: int | None = None,
+) -> None:
+    """Connect, read, disconnect, sleep — forever, or ``iterations`` times."""
+
+    remaining = iterations
+    while remaining is None or remaining > 0:
+        print('Fetching metrics')
+        service.connect()
+        service.read()
+        service.disconnect()
+        time.sleep(interval_in_seconds)
+        if remaining is not None:
+            remaining -= 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    config = resolve_config(parse_args(argv), os.environ)
+    print(describe_settings(config))
+
+    gauges = build_gauges(REGISTRY)
+    start_http_server(config.metrics_port)
+    print('Started metrics endpoint on port %s' % config.metrics_port)
+
+    poll_forever(Teamspeak3MetricService(config, gauges))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
