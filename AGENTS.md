@@ -60,6 +60,8 @@ The settings banner censors it today. Keep it censored.
 
 `--ts3password` exposes the password through the process list. The documentation MUST keep recommending `TEAMSPEAK_PASSWORD` instead. Do not remove the flag — it is existing public behavior.
 
+This rule is not scoped to `app.py`. Test support, fakes, harnesses and scripts MUST NOT print a password either, even a fixture one — an exception that is visible in the tree is an exception the next change will copy.
+
 Never commit a real host, password, or ServerQuery credential. Test fixtures use fake values.
 
 ## Architecture
