@@ -60,6 +60,26 @@ jobs:
         id: ghcr
         run: echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      # The tag trigger 'v*.*.*' also matches non-semver tags such as
+      # v1.2.foo, which contain no "-" and would otherwise still pass the
+      # prerelease check below. Validate strictly so a malformed tag can't
+      # overwrite "latest" or produce a wrongly-labelled GitHub Release.
+      - name: Parse release tag
+        id: version
+        run: |
+          ref="${{ github.ref_name }}"
+          if [[ "${{ github.event_name }}" == "push" && "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+            if [[ "$ref" == *-* ]]; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -90,7 +110,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && steps.version.outputs.valid == 'true' && steps.version.outputs.prerelease == 'false' }}
 
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         id: build
@@ -114,3 +134,4 @@ jobs:
         if: github.event_name == 'push' && steps.dry_run.outputs.value != 'true'
         with:
           generate_release_notes: true
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
