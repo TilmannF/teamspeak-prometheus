@@ -12,6 +12,7 @@
 - [ ] `make check` passes
 - [ ] `make test-smoke` passes, or is not relevant
 - [ ] Tests added or updated for behavior changes
+- [ ] `CHANGELOG.md` updated, or not needed (internal-only change)
 
 <!-- Say what you did NOT run, and why. -->
 

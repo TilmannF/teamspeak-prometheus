@@ -4,6 +4,10 @@ Thanks for looking. This is a small read-only TeamSpeak 3 → Prometheus exporte
 It is [developed with AI assistance](docs/ai.md) under human direction.
 Contributions can come from humans or models. The bar is the same.
 
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). Issues
+use forms — pick the one that fits, or the config points you to the right
+place if none does.
+
 ## Before you write code
 
 1. Read [README.md](README.md) and [docs/architecture.md](docs/architecture.md).
@@ -43,3 +47,8 @@ See [docs/testing.md](docs/testing.md).
 - `make check` green; CI runs the same checks plus the smoke tests and a Docker
   build
 - Say what you did not run, and why
+
+## Releasing
+
+Maintainers only — see [docs/releasing.md](docs/releasing.md) for how a
+version is cut and what each part of it means for the metric contract.
