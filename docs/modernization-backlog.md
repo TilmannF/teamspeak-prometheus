@@ -73,13 +73,9 @@ is quiet" from "the exporter has been failing for an hour".
 ## 9. Container hardening
 
 The image runs as root, installs `git` only to fetch the archived dependency
-(item 1), has no `HEALTHCHECK`, and is built for a single architecture. There is
-also a stray typo in the `apk` cleanup line of the `Dockerfile`.
-
-## 10. Publishing
-
-No automated image build or tag publishing, and no dependency update automation
-(Dependabot or Renovate).
+(item 1), and has no `HEALTHCHECK`. There is also a stray typo in the `apk`
+cleanup line of the `Dockerfile`. Multi-architecture builds and automated
+publishing are handled by `.github/workflows/release.yml`.
 
 ## 11. Grafana dashboard
 
