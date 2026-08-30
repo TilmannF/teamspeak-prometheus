@@ -5,4 +5,8 @@
 # never imports ts3 (see docs/testing.md). Pinned to a commit for reproducible
 # builds. Replacing it is item 1 in docs/modernization-backlog.md.
 python-ts3 @ git+https://github.com/nikdoof/python-ts3@54cd134f79abf9a87d7e753aa012550ef0910668 ; python_version < "3.13"
+# The declared range is real, not aspirational: the full test suite passes
+# against 0.7.1, 0.9.0, 0.14.1, 0.20.0 and 0.26.0 on Python 3.12. The floor
+# predates this repository's tests and start_http_server has accepted the
+# registry keyword since well before it.
 prometheus_client>=0.7.1,<1.0
