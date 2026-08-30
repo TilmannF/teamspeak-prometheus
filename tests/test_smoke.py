@@ -14,6 +14,8 @@ import time
 import pytest
 import requests
 
+from tests.fake_ts3_server import VIRTUALSERVERS
+
 pytestmark = pytest.mark.smoke
 
 PASSWORD = 'smoke-test-password'
@@ -56,17 +58,33 @@ def exporter():
 
 
 def scrape(port: int, timeout: float = 20.0) -> str:
+    """Scrape until a full poll cycle has landed.
+
+    The exporter updates gauges one virtualserver at a time, so a body can
+    contain the first virtualserver and not yet the second. Waiting for every
+    known virtualserver is what makes this deterministic -- waiting for any
+    single sample races the poll loop.
+    """
+
+    expected = [server['virtualserver_name'] for server in VIRTUALSERVERS]
     deadline = time.monotonic() + timeout
     last_error: Exception | None = None
+    body = ''
     while time.monotonic() < deadline:
         try:
             body = requests.get('http://127.0.0.1:%d/metrics' % port, timeout=2).text
-            if 'teamspeak_virtualserver_clientsonline{' in body:
+            if all(
+                'teamspeak_virtualserver_uptime{virtualserver_name="%s"}' % name in body
+                for name in expected
+            ):
                 return body
         except requests.RequestException as err:  # server not up yet
             last_error = err
         time.sleep(0.2)
-    raise AssertionError('exporter never served metrics (%s)' % last_error)
+    raise AssertionError(
+        'exporter never served a complete cycle for %s (last error: %s)'
+        % (expected, last_error)
+    )
 
 
 def test_the_exporter_serves_teamspeak_metrics(exporter):
