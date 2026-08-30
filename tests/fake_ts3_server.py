@@ -140,7 +140,7 @@ def main() -> int:
     parser.add_argument(
         '--password',
         default='fake-password',
-        help='ServerQuery password the fake server accepts (default: %(default)s)',
+        help='ServerQuery password the fake server accepts (see docs/testing.md)',
     )
     parser.add_argument('--port', type=int, default=0, help='0 picks a free port')
     args = parser.parse_args()

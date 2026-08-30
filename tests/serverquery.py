@@ -32,10 +32,31 @@ def escape(value: object) -> str:
     return text
 
 
+_UNESCAPES = {escaped[1]: raw for raw, escaped in _ESCAPES}
+
+
 def unescape(value: str) -> str:
-    for raw, escaped in reversed(_ESCAPES):
-        value = value.replace(escaped, raw)
-    return value
+    """Decode escape sequences in a single left-to-right pass.
+
+    Sequential ``str.replace`` calls cannot do this: they re-examine text they
+    just produced, so an escaped backslash followed by an escape letter gets
+    decoded twice -- ``abc\\s`` would come back as ``abc\\ ``, and ``a\\\\b`` as a
+    backspace character.
+    """
+
+    out: list[str] = []
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if character == '\\' and index + 1 < len(value):
+            replacement = _UNESCAPES.get(value[index + 1])
+            if replacement is not None:
+                out.append(replacement)
+                index += 2
+                continue
+        out.append(character)
+        index += 1
+    return ''.join(out)
 
 
 def encode_pairs(pairs: dict[str, object]) -> str:

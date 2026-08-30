@@ -28,6 +28,7 @@ make run-fake RUN_FAKE_ARGS="--iterations 2 --interval 0.2"   # what CI runs
 | `tests/query_client.py` | Socket client used by the harness (see below) |
 | `tests/exporter_harness.py` | Runs the real exporter against the fake server |
 | `tests/fakes.py` | In-process fake client for unit tests — no sockets |
+| `tests/test_serverquery.py` | Escaping and framing round-trips |
 | `tests/test_config.py` | Defaults, environment precedence, port parsing |
 | `tests/test_metrics.py` | The metric contract: names, prefix, label, values |
 | `tests/test_service.py` | Login, the poll sequence, error paths |
@@ -80,3 +81,8 @@ with FakeTs3Server(password='fake-password') as server:
 ```
 
 It binds an ephemeral port, so tests never collide.
+
+`fake-password` is the password the fake server accepts by default, both in that
+constructor and when running it standalone with `python -m tests.fake_ts3_server`.
+It is documented here rather than printed by the program, so that nothing in the
+tree prints a password — see AGENTS.md, "Secrets".
