@@ -79,8 +79,9 @@ List all arguments with `python app.py -h`.
 | `--metricsport` | Port on which this service exposes the metrics | *8000* |
 
 **Prefer `TEAMSPEAK_PASSWORD` over `--ts3password`.** A command-line argument
-is visible to anything that can read the process list; the environment
-variable is not.
+is visible to anything that can read the process list (`ps`, `/proc/<pid>/cmdline`);
+the environment variable is not on the command line, though it is still
+readable by the same user, root, or `docker inspect` on the container.
 
 ## Deployment
 
