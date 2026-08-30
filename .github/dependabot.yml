@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Keeps the commit-SHA pins in the workflows from rotting. This is the one
+  # that matters most here.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    # The base image is pinned to 3.12: nikdoof/python-ts3 imports telnetlib,
+    # removed in Python 3.13, so the exporter cannot run on a newer
+    # interpreter until docs/modernization-backlog.md item 1 is done. Without
+    # this, Dependabot proposes a 3.13+ bump that would break the image.
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
