@@ -68,9 +68,15 @@ jobs:
         id: version
         run: |
           ref="${{ github.ref_name }}"
-          if [[ "${{ github.event_name }}" == "push" && "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+          # SemVer forbids a leading zero in major/minor/patch (except "0"
+          # itself), so each is (0|[1-9][0-9]*) rather than plain [0-9]+.
+          # Prerelease is read from capture group 4 -- not a whole-string "-"
+          # scan -- so build metadata (after "+") can contain a hyphen, e.g.
+          # v1.2.3+linux-amd64, without being mistaken for a prerelease.
+          semver_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if [[ "${{ github.event_name }}" == "push" && "$ref" =~ $semver_re ]]; then
             echo "valid=true" >> "$GITHUB_OUTPUT"
-            if [[ "$ref" == *-* ]]; then
+            if [[ -n "${BASH_REMATCH[4]}" ]]; then
               echo "prerelease=true" >> "$GITHUB_OUTPUT"
             else
               echo "prerelease=false" >> "$GITHUB_OUTPUT"
