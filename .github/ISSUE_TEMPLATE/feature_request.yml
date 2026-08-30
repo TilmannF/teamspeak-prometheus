@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest something the exporter should do
+labels: [enhancement]
+body:
+  - type: checkboxes
+    id: not-a-scope-item
+    attributes:
+      label: Scope check
+      description: >-
+        Read AGENTS.md, "What This Project Is Not", before filing. This project
+        is deliberately a thin, read-only exporter.
+      options:
+        - label: >-
+            My request is not a ServerQuery command that mutates server state
+            (kick, ban, move, message, channel or permission edits), a bot/chat/
+            moderation feature, a web UI or dashboard server, an API beyond
+            /metrics, persistence or a database, its own alerting, multi-server
+            fan-out, or telemetry/phone-home behavior
+          required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you want the exporter to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What problem does this solve that you can't solve today?
+    validations:
+      required: true

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/TilmannF/teamspeak-prometheus/security/advisories/new
+    about: See SECURITY.md. Do not file a public issue for a vulnerability.
+  - name: Contributing a change
+    url: https://github.com/TilmannF/teamspeak-prometheus/blob/master/CONTRIBUTING.md
+    about: Read this before opening a pull request.
+  - name: Known weaknesses (modernization backlog)
+    url: https://github.com/TilmannF/teamspeak-prometheus/blob/master/docs/modernization-backlog.md
+    about: Already known and tracked — please don't file these as new issues.
