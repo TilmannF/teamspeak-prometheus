@@ -101,8 +101,9 @@ and be killed after Docker's 10-second grace period (exit code 137).
 
 `tests/test_smoke.py::test_no_tool_prints_its_password` runs every command-line
 tool — the exporter, the healthcheck, the harness, the fake server — with
-awkward passwords: equal to a port the tool prints, or starting with `-`, or
-after a mistyped flag. No output may contain the password. **A new
+awkward passwords: equal to a port the tool prints, starting with `-`, after a
+mistyped flag, equal to a flag name, or equal to (or inside) the censoring
+marker `*censored*` itself. No output may contain the password. **A new
 command-line tool gets a row in `tool_cases()`.**
 
 ## Adding a metric

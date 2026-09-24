@@ -554,8 +554,9 @@ def test_the_fake_server_never_prints_a_password_equal_to_its_port():
 
 # -- no tool prints its password, however it is chosen -------------------------
 #
-# One row per tool and awkward password: equal to the port the tool prints, or
-# looking like an option. A new command-line tool gets a row here.
+# One row per tool and awkward password: equal to the port the tool prints,
+# looking like an option, equal to a flag name, or equal to (or inside) the
+# censoring marker itself. A new command-line tool gets a row here.
 
 
 def run_briefly(argv: list[str], env: dict[str, str], seconds: float = 3) -> str:
@@ -618,6 +619,40 @@ def tool_cases() -> list[tuple[str, list[str], dict[str, str], str]]:
             dash,
         ),
         (
+            'exporter, password = the censoring marker',
+            ['app.py'],
+            {
+                'TEAMSPEAK_HOST': '127.0.0.1',
+                'TEAMSPEAK_PORT': unreachable,
+                'TEAMSPEAK_PASSWORD': '*censored*',
+                'METRICS_PORT': port,
+            },
+            '*censored*',
+        ),
+        (
+            'exporter, password inside the marker',
+            ['app.py'],
+            {
+                'TEAMSPEAK_HOST': '127.0.0.1',
+                'TEAMSPEAK_PORT': unreachable,
+                'TEAMSPEAK_PASSWORD': 'censor',
+                'METRICS_PORT': port,
+            },
+            'censor',
+        ),
+        (
+            'exporter, environment password = a flag name',
+            ['app.py', '--ts3port'],
+            {'TEAMSPEAK_PASSWORD': '--ts3port'},
+            '--ts3port',
+        ),
+        (
+            'exporter, flag password = a flag name',
+            ['app.py', '--ts3password=--metricsport', '--metricsport'],
+            {},
+            '--metricsport',
+        ),
+        (
             'healthcheck, password = metrics port',
             ['healthcheck.py'],
             {'TEAMSPEAK_PASSWORD': port, 'METRICS_PORT': port},
@@ -661,6 +696,29 @@ def tool_cases() -> list[tuple[str, list[str], dict[str, str], str]]:
             ['-m', 'tests.fake_ts3_server', '--port', port, '--password', port],
             {},
             port,
+        ),
+        (
+            'harness, password = the censoring marker',
+            [
+                '-m',
+                'tests.exporter_harness',
+                '--metricsport',
+                port,
+                '--ts3password',
+                '*censored*',
+                '--iterations',
+                '1',
+                '--interval',
+                '0.2',
+            ],
+            {},
+            '*censored*',
+        ),
+        (
+            'fake server, password = a flag name',
+            ['-m', 'tests.fake_ts3_server', '--password=--port', '--port'],
+            {},
+            '--port',
         ),
         (
             'fake server, mistyped flag with dash password',
