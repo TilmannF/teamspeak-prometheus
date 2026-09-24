@@ -62,7 +62,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
 - Command-line errors never repeat a value: only the exporter's own flag names
   stay visible, so a mistyped `--ts3pasword <password>` is reported as
   `unrecognized arguments: … …`. Configuration errors are censored like every
-  other log line.
+  other log line. Every password given — also one left on the command line
+  while the environment overrides it — is censored everywhere: logs, metric
+  labels, command-line errors and their usage line.
 - Text from the TeamSpeak server is treated as untrusted: the password is
   censored from every finished log line — also where it coincides with a
   number such as the metrics port — tracebacks included, and from virtualserver

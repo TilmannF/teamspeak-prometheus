@@ -227,6 +227,14 @@ first with `TEAMSPEAK_PASSWORD`, then with every password given — flag and
 environment variable, used or overridden. A configuration error that quotes an
 invalid value equal to the password therefore prints `*censored*`.
 
+There is one list of passwords, and every place that censors gets it: the log
+filter, the service (for `virtualserver_name` labels), and argparse errors
+(which, parsed before the flags are, get the environment password and read the
+`--ts3password` value from the command line themselves — also as
+`--ts3password=…` or an abbreviation). A password left on the command line
+while the environment overrides it, e.g. during a rotation, is censored
+everywhere. `tests/test_cli.py` checks that `main()` hands out the same list.
+
 argparse prints its own errors to stderr, outside logging.
 `SafeArgumentParser` keeps only the option strings it defines visible
 (`--ts3host`, `--help`, …) and replaces every other command-line token with
@@ -235,5 +243,8 @@ too: a mistyped `--ts3pasword` and a password `-secret` cannot be told apart.
 So `--ts3pasword <password>` reports
 `unrecognized arguments: … … (argument values hidden; see --help)`, while
 `argument --ts3port: expected one argument` stays readable. Only whole
-fragments are masked; a password `3` leaves `--ts3port` intact. The test harness and the fake server use
+fragments are masked; a stray `3` leaves `--ts3port` intact. A *password*,
+though, is censored wherever it appears — in the message and in the usage line
+argparse prints with it — so a password that equals a flag name, or a password
+`3`, garbles the flag names shown. Censoring wins over readability. The test harness and the fake server use
 it too, and a test scans the repository for any parser that does not.

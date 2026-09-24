@@ -681,3 +681,22 @@ def test_no_tool_prints_its_password(case):
 
     assert output.strip(), f'{name}: no output at all, the test proves nothing'
     assert secret not in output, f'{name} printed its password'
+
+
+def test_an_overridden_flag_password_is_censored_in_the_metrics():
+    # --ts3password old-secret, overridden by TEAMSPEAK_PASSWORD: a rotation
+    # leftover. The server names a virtualserver after the old one.
+    old = 'old-' + PASSWORD
+    with FakeTs3Server(password=PASSWORD, names=[f'Server {old}']) as server:
+        output, body = scrape_app(
+            {
+                'TEAMSPEAK_HOST': server.host,
+                'TEAMSPEAK_PORT': str(server.port),
+                'TEAMSPEAK_PASSWORD': PASSWORD,
+            },
+            re.compile(r'virtualserver_name="Server \*censored\*"'),
+            argv=('--ts3password', old),
+        )
+
+    assert old not in body
+    assert old not in output

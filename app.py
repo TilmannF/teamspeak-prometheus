@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import NoReturn, Protocol
+from typing import Any, NoReturn, Protocol
 
 from prometheus_client import (
     REGISTRY,
@@ -444,14 +444,54 @@ class SafeArgumentParser(argparse.ArgumentParser):
 
     _argv: list[str] = []
 
+    def __init__(
+        self,
+        *args: Any,
+        secret_options: tuple[str, ...] = (),
+        secrets: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """``secret_options`` are the flags that take a password; ``secrets``
+        are passwords known from elsewhere (the environment). Both are censored
+        in error messages even where they equal a flag name, which masking
+        alone leaves visible."""
+
+        super().__init__(*args, **kwargs)
+        self.secret_options = secret_options
+        self.secrets = list(secrets or [])
+
     def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
         self._argv = list(sys.argv[1:] if args is None else args)
         return super().parse_known_args(args, namespace)
 
     def error(self, message: str) -> NoReturn:
-        super().error(
-            _mask_values(message, self._argv, set(self._option_string_actions))
+        # argparse.ArgumentParser.error, with the usage line and the message
+        # both censored: a password can equal a flag name the usage shows.
+        masked = _mask_values(message, self._argv, set(self._option_string_actions))
+        secrets = secrets_for_redaction(
+            self.secrets + _option_values(self._argv, self.secret_options)
         )
+        self._print_message(redact(self.format_usage(), secrets), sys.stderr)
+        self.exit(2, redact(f'{self.prog}: error: {masked}\n', secrets))
+
+
+def _option_values(argv: list[str], options: tuple[str, ...]) -> list[str]:
+    """Values given to any of ``options``, as argparse would read them:
+    ``--opt value``, ``--opt=value``, and unambiguous abbreviations. Taking a
+    few too many is harmless -- they are only censored."""
+
+    values = []
+    for index, token in enumerate(argv):
+        name, separator, value = token.partition('=')
+        if len(name) < 3 or not name.startswith('--'):
+            continue
+        if not any(option.startswith(name) for option in options):
+            continue
+        if separator:
+            values.append(value)
+        elif index + 1 < len(argv):
+            values.append(argv[index + 1])
+    return values
 
 
 def _mask_values(message: str, argv: list[str], known: set[str]) -> str:
@@ -478,7 +518,9 @@ def _mask_values(message: str, argv: list[str], known: set[str]) -> str:
     return masked
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def parse_args(
+    argv: list[str] | None = None, secrets: list[str] | None = None
+) -> argparse.Namespace:
     """Parse flags as plain strings.
 
     Nothing is converted or validated here: environment variables take
@@ -487,7 +529,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     Unset flags stay ``None`` so that precedence can be traced.
     """
 
-    parser = SafeArgumentParser()
+    parser = SafeArgumentParser(secret_options=('--ts3password',), secrets=secrets)
     parser.add_argument(
         '--ts3host',
         help=f'Hostname or ip address of TS3 server (default: {DEFAULT_TS3_HOST})',
@@ -826,6 +868,7 @@ class Teamspeak3MetricService:
         exporter_metrics: ExporterMetrics,
         client_factory: ClientFactory = default_client_factory,
         clock: Callable[[], float] = time.time,
+        secrets: list[str] | None = None,
     ) -> None:
         self.config = config
         self.gauges = gauges
@@ -836,8 +879,10 @@ class Teamspeak3MetricService:
         self._warned_missing: set[tuple[str, str]] = set()
         # Label values come from the server and are untrusted, like its log
         # text: a hostile server could name a virtualserver after the password
-        # it was just sent, and /metrics is unauthenticated.
-        self._secrets = secrets_for_redaction([config.password])
+        # it was just sent, and /metrics is unauthenticated. ``secrets`` is
+        # every password given (main passes the log filter's list); the
+        # configured one is always among them.
+        self._secrets = secrets_for_redaction([config.password, *(secrets or [])])
         # virtualserver id -> status, for those serverlist reports not online
         self._not_online: dict[str, str] = {}
         # names shared by several virtualservers, already warned about
@@ -1134,11 +1179,12 @@ def handle_termination() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     # Redaction first: configuration errors quote the offending value, which
-    # can equal the password. Every password given counts, used or not.
-    configure_logging(
-        DEFAULT_LOG_LEVEL, secrets=password_candidates(argparse.Namespace(), os.environ)
-    )
-    args = parse_args(argv)
+    # can equal the password. Every password given counts, used or not, and
+    # the same list reaches every place that censors: argparse errors, the log
+    # filter, and the service's metric labels.
+    environment_secrets = password_candidates(argparse.Namespace(), os.environ)
+    configure_logging(DEFAULT_LOG_LEVEL, secrets=environment_secrets)
+    args = parse_args(argv, secrets=environment_secrets)
     secrets = password_candidates(args, os.environ)
     configure_logging(DEFAULT_LOG_LEVEL, secrets=secrets)
     try:
@@ -1153,13 +1199,13 @@ def main(argv: list[str] | None = None) -> int:
 
     handle_termination()
     try:
-        return serve(config)
+        return serve(config, secrets)
     except (KeyboardInterrupt, Shutdown):
         log.info('Stopped')
         return 0
 
 
-def serve(config: Config) -> int:
+def serve(config: Config, secrets: list[str]) -> int:
     """Expose the metrics and poll until interrupted."""
 
     gauges = build_gauges(REGISTRY)
@@ -1171,9 +1217,8 @@ def serve(config: Config) -> int:
         return 1
     log.info('Started metrics endpoint on port %s', config.metrics_port)
 
-    poll_forever(
-        Teamspeak3MetricService(config, gauges, exporter_metrics), config.poll_interval
-    )
+    service = Teamspeak3MetricService(config, gauges, exporter_metrics, secrets=secrets)
+    poll_forever(service, config.poll_interval)
     return 0
 
 

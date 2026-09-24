@@ -97,11 +97,28 @@ def test_known_flags_stay_visible(capsys):
 
 
 def test_masking_replaces_whole_values_only(capsys):
-    # the password "3" must not turn "--ts3port" into "--ts…port"
-    err = parse_error(['--ts3password', '3', '--ts3=3'], capsys)
+    # a stray value "3" -- not a password, attached to no flag -- must not
+    # turn "--ts3port" into "--ts…port"
+    err = parse_error(['3', '--ts3'], capsys)
 
     assert 'could match --ts3host, --ts3port' in err
     assert 'ambiguous option: … could match' in err
+
+
+def test_an_ambiguous_abbreviation_of_the_password_flag_is_treated_as_one(capsys):
+    # "--ts3=3" might mean --ts3password=3: censoring too much is the safe side
+    err = parse_error(['--ts3=3'], capsys)
+
+    assert '3' not in err.split('error:')[1]
+
+
+def test_a_password_is_censored_wherever_it_appears(capsys):
+    # The password "3" is part of "--ts3port": showing that flag shows the
+    # password. Censoring wins over readability.
+    err = parse_error(['--ts3password', '3', '--ts3=x'], capsys)
+
+    assert '3' not in err.split('error:')[1]
+    assert '3' not in err.split('error:')[0]  # the usage line too
 
 
 def test_a_flag_missing_its_value_is_still_reported(capsys):
@@ -263,3 +280,92 @@ def test_the_test_tools_never_print_a_value_either(tool, argv, capsys):
     assert caught.value.code == 2
     assert 'unrecognized arguments' in err
     assert SECRET not in err
+
+
+# -- a password equal to a flag name is censored in argparse errors ------------
+
+
+def parse_error_with(argv: list[str], secrets: list[str], capsys) -> str:
+    with pytest.raises(SystemExit) as caught:
+        app.parse_args(argv, secrets=secrets)
+    assert caught.value.code == 2
+    return capsys.readouterr().err
+
+
+def test_an_environment_password_equal_to_a_flag_name_is_censored(capsys):
+    err = parse_error_with(['--ts3port'], ['--ts3port'], capsys)
+
+    assert '--ts3port' not in err
+    assert 'expected one argument' in err
+
+
+@pytest.mark.parametrize(
+    'argv',
+    [
+        ['--ts3password=--ts3port', '--ts3port'],
+        ['--ts3pass=--ts3port', '--ts3port'],  # abbreviated
+        ['--ts3password', '--ts3port', '--ts3port'],
+    ],
+    ids=['equals', 'abbreviated', 'separate'],
+)
+def test_a_flag_password_equal_to_a_flag_name_is_censored(argv, capsys):
+    err = parse_error(argv, capsys)
+
+    assert '--ts3port' not in err
+
+
+def test_main_censors_an_environment_password_equal_to_a_flag_name(clean_env, capsys):
+    clean_env.setenv('TEAMSPEAK_PASSWORD', '--ts3port')
+
+    with pytest.raises(SystemExit):
+        app.main(['--ts3port'])
+
+    assert '--ts3port' not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('tool', ['harness', 'fake-server'])
+def test_the_test_tools_censor_their_password_equal_to_a_flag_name(tool, capsys):
+    from tests import exporter_harness, fake_ts3_server
+
+    main, option, other = {
+        'harness': (exporter_harness.main, '--ts3password', '--metricsport'),
+        'fake-server': (fake_ts3_server.main, '--password', '--port'),
+    }[tool]
+
+    with pytest.raises(SystemExit):
+        main([f'{option}={other}', other])
+
+    assert other not in capsys.readouterr().err
+
+
+def test_main_hands_one_password_list_to_every_censor(clean_env, monkeypatch):
+    """The log filter, the service's labels and argparse errors all censor the
+    same passwords: the flag one and the environment one, used or not."""
+
+    clean_env.setenv('TEAMSPEAK_PASSWORD', 'from-env')
+    seen: dict[str, list[list[str]]] = {'logging': [], 'argparse': [], 'service': []}
+    configure_logging, parse_args = app.configure_logging, app.parse_args
+
+    def record_logging(level, secrets=None):
+        seen['logging'].append(sorted(secrets or []))
+        configure_logging(level, secrets)
+
+    def record_parse_args(argv=None, secrets=None):
+        seen['argparse'].append(sorted(secrets or []))
+        return parse_args(argv, secrets)
+
+    def record_serve(config, secrets):
+        seen['service'].append(sorted(secrets))
+        return 0
+
+    monkeypatch.setattr(app, 'configure_logging', record_logging)
+    monkeypatch.setattr(app, 'parse_args', record_parse_args)
+    monkeypatch.setattr(app, 'serve', record_serve)
+    monkeypatch.setattr(app, 'handle_termination', lambda: None)
+
+    assert app.main(['--ts3password', 'from-flag']) == 0
+
+    both = ['from-env', 'from-flag']
+    assert seen['argparse'] == [['from-env']]  # before the flags are parsed
+    assert seen['logging'] == [['from-env'], both, both]
+    assert seen['service'] == [both]

@@ -197,6 +197,8 @@ class FakeTs3Server:
     many commands per ``flood_window`` seconds, shared by all connections --
     TeamSpeak counts per client IP, and every test client is 127.0.0.1.
 
+    ``names`` replaces the virtualserver names, first to last.
+
     ``stopped`` lists virtualserver ids reported ``offline`` by ``serverlist``;
     ``use`` on them fails with error 1033, as on TeamSpeak 3.13.
 
@@ -216,6 +218,7 @@ class FakeTs3Server:
         flood_window: float = 3.0,
         hostile: bool = False,
         stopped: frozenset[int] = frozenset(),
+        names: list[str] | None = None,
     ):
         self._server = _Server((host, port), _Handler)
         self._server.password = password
@@ -225,6 +228,8 @@ class FakeTs3Server:
             else server
             for server in virtualservers(virtualserver_count)
         ]
+        for server, name in zip(self._server.virtualservers, names or [], strict=False):
+            server['virtualserver_name'] = name
         self._server.flood = _FloodGuard(flood_limit, flood_window)
         self._server.hostile = hostile
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -259,7 +264,7 @@ class FakeTs3Server:
 
 def main(argv: list[str] | None = None) -> int:
     # Masks values in its errors: --password takes a password, see AGENTS.md.
-    parser = SafeArgumentParser(description=__doc__)
+    parser = SafeArgumentParser(description=__doc__, secret_options=('--password',))
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument(
         '--password',

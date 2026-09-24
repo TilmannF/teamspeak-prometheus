@@ -511,3 +511,42 @@ def test_backoff_never_overflows_or_exceeds_its_cap(interval, failures):
     assert interval < delay <= max(interval, app.MAX_BACKOFF_IN_SECONDS) or (
         delay == interval == 86400
     )
+
+
+def test_every_password_given_is_censored_in_labels():
+    # --ts3password old overridden by TEAMSPEAK_PASSWORD new: both are secrets
+    registry = CollectorRegistry()
+    client = FakeTs3Client(
+        servers=[{'virtualserver_id': 1, 'virtualserver_name': 'Server old-secret'}]
+    )
+    service = app.Teamspeak3MetricService(
+        CONFIG,
+        app.build_gauges(registry),
+        app.build_exporter_metrics(registry),
+        factory_for(client),
+        secrets=['old-secret', CONFIG.password],
+    )
+
+    service.poll()
+
+    exposition = generate_latest(registry).decode()
+    assert 'old-secret' not in exposition
+    assert 'virtualserver_name="Server *censored*"' in exposition
+
+
+def test_the_configured_password_is_always_a_secret():
+    registry = CollectorRegistry()
+    client = FakeTs3Client(
+        servers=[{'virtualserver_id': 1, 'virtualserver_name': CONFIG.password}]
+    )
+    service = app.Teamspeak3MetricService(
+        CONFIG,
+        app.build_gauges(registry),
+        app.build_exporter_metrics(registry),
+        factory_for(client),
+        secrets=['something-else'],
+    )
+
+    service.poll()
+
+    assert CONFIG.password not in generate_latest(registry).decode()

@@ -67,7 +67,9 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = app.SafeArgumentParser(description=__doc__)
+    parser = app.SafeArgumentParser(
+        description=__doc__, secret_options=('--ts3password',)
+    )
     parser.add_argument('--ts3host', default='127.0.0.1')
     parser.add_argument('--ts3port', type=int, default=0, help='0 starts a fake server')
     parser.add_argument('--ts3password', default='fake-password')
