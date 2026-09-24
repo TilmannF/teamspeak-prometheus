@@ -48,6 +48,9 @@ SERVERQUERY_TIMEOUT_IN_SECONDS = 10.0
 # After this many consecutive failed polls the wait between attempts stops
 # growing. Never shorter than the configured interval.
 MAX_BACKOFF_IN_SECONDS = 60.0
+# Upper bound for the poll interval. Anything slower is not monitoring, and far
+# larger values overflow time.sleep().
+MAX_POLL_INTERVAL_IN_SECONDS = 86400.0
 # TeamSpeak throttles query clients that are not on its allowlist (default: 10
 # commands per 3 seconds) and answers ``error id=524``. The exporter waits as
 # told and retries the command this many times before giving up on it.
@@ -481,8 +484,11 @@ def _interval(value: object) -> float:
         raise ExporterError(
             f'TEAMSPEAK_POLL_INTERVAL must be a number of seconds, got {value!r}'
         ) from err
-    if not interval > 0:
-        raise ExporterError(f'TEAMSPEAK_POLL_INTERVAL must be positive, got {value!r}')
+    if not 0 < interval <= MAX_POLL_INTERVAL_IN_SECONDS:
+        raise ExporterError(
+            'TEAMSPEAK_POLL_INTERVAL must be more than 0 and at most '
+            f'{MAX_POLL_INTERVAL_IN_SECONDS:g} seconds, got {value!r}'
+        )
     return interval
 
 

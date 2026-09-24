@@ -78,6 +78,10 @@ def test_ports_from_the_environment_are_integers():
     assert config.metrics_port == 9000
 
 
+def test_a_poll_interval_of_one_day_is_allowed():
+    assert resolve(TEAMSPEAK_POLL_INTERVAL='86400').poll_interval == 86400
+
+
 def test_a_fractional_poll_interval_is_allowed():
     assert resolve(TEAMSPEAK_POLL_INTERVAL='2.5').poll_interval == 2.5
 
@@ -91,6 +95,10 @@ def test_a_fractional_poll_interval_is_allowed():
         ('TEAMSPEAK_POLL_INTERVAL', 'soon'),
         ('TEAMSPEAK_POLL_INTERVAL', '0'),
         ('TEAMSPEAK_POLL_INTERVAL', '-5'),
+        ('TEAMSPEAK_POLL_INTERVAL', 'nan'),
+        ('TEAMSPEAK_POLL_INTERVAL', 'inf'),
+        ('TEAMSPEAK_POLL_INTERVAL', '1e10'),
+        ('TEAMSPEAK_POLL_INTERVAL', '86401'),
         ('LOG_LEVEL', 'chatty'),
     ],
 )

@@ -70,7 +70,7 @@ the exporter logs a warning for every flag an environment variable overrides.
 | `TEAMSPEAK_USERNAME` | ServerQuery username of TS3 server | *serveradmin* |
 | `TEAMSPEAK_PASSWORD` | ServerQuery password of TS3 server |  |
 | `METRICS_PORT` | Port on which this service exposes the metrics | *8000* |
-| `TEAMSPEAK_POLL_INTERVAL` | Seconds between two polls of the TS3 server | *5* |
+| `TEAMSPEAK_POLL_INTERVAL` | Seconds between two polls of the TS3 server, at most 86400 | *5* |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
 ### Command-line arguments
@@ -84,7 +84,7 @@ List all arguments with `python app.py -h`.
 | `--ts3username` | ServerQuery username of TS3 server | *serveradmin* |
 | `--ts3password` | ServerQuery password of TS3 server |  |
 | `--metricsport` | Port on which this service exposes the metrics | *8000* |
-| `--pollinterval` | Seconds between two polls of the TS3 server | *5* |
+| `--pollinterval` | Seconds between two polls of the TS3 server, at most 86400 | *5* |
 | `--loglevel` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
 **Prefer `TEAMSPEAK_PASSWORD` over `--ts3password`.** A command-line argument
