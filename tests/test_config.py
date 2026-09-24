@@ -125,6 +125,24 @@ def test_an_overridden_password_flag_is_reported_without_either_value():
     assert overridden == ['--ts3password (TEAMSPEAK_PASSWORD is set)']
 
 
+def test_an_invalid_flag_overridden_by_a_valid_env_value_is_only_reported():
+    args = app.parse_args(['--ts3port', '70000', '--pollinterval', 'inf'])
+    env = {'TEAMSPEAK_PORT': '10011', 'TEAMSPEAK_POLL_INTERVAL': '5'}
+
+    config = app.resolve_config(args, env)
+
+    assert config.port == 10011
+    assert app.overridden_flags(args, env) == [
+        '--ts3port (TEAMSPEAK_PORT is set)',
+        '--pollinterval (TEAMSPEAK_POLL_INTERVAL is set)',
+    ]
+
+
+def test_an_invalid_flag_is_still_rejected_when_nothing_overrides_it():
+    with pytest.raises(app.ExporterError, match='TEAMSPEAK_PORT'):
+        resolve(['--ts3port', '70000'])
+
+
 def test_equal_values_in_different_spelling_are_not_reported():
     args = app.parse_args(['--pollinterval', '5', '--loglevel', 'info'])
 

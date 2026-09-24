@@ -361,23 +361,6 @@ class Config:
     log_level: str = DEFAULT_LOG_LEVEL
 
 
-# Every option: (argparse dest, environment variable, default, Config field).
-_OPTIONS = [
-    ('ts3host', 'TEAMSPEAK_HOST', DEFAULT_TS3_HOST, 'host'),
-    ('ts3port', 'TEAMSPEAK_PORT', DEFAULT_TS3_PORT, 'port'),
-    ('ts3username', 'TEAMSPEAK_USERNAME', DEFAULT_TS3_USERNAME, 'username'),
-    ('ts3password', 'TEAMSPEAK_PASSWORD', DEFAULT_TS3_PASSWORD, 'password'),
-    ('metricsport', 'METRICS_PORT', DEFAULT_METRICS_PORT, 'metrics_port'),
-    (
-        'pollinterval',
-        'TEAMSPEAK_POLL_INTERVAL',
-        DEFAULT_POLL_INTERVAL_IN_SECONDS,
-        'poll_interval',
-    ),
-    ('loglevel', 'LOG_LEVEL', DEFAULT_LOG_LEVEL, 'log_level'),
-]
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse flags. Unset flags stay ``None`` so env precedence can be traced."""
 
@@ -431,40 +414,33 @@ def resolve_config(args: argparse.Namespace, env: Mapping[str, str]) -> Config:
     behavior this exporter has always had.
     """
 
-    def pick(dest: str, variable: str, default: object) -> object:
-        if variable in env:
-            return env[variable]
-        value = getattr(args, dest, None)
-        return default if value is None else value
-
-    values = {
-        dest: pick(dest, variable, default) for dest, variable, default, _ in _OPTIONS
-    }
-    return Config(
-        host=str(values['ts3host']),
-        port=_port('TEAMSPEAK_PORT', values['ts3port']),
-        username=str(values['ts3username']),
-        password=str(values['ts3password']),
-        metrics_port=_port('METRICS_PORT', values['metricsport']),
-        poll_interval=_interval(values['pollinterval']),
-        log_level=_log_level(values['loglevel']),
-    )
+    values = {}
+    for dest, variable, default, field, parse in _OPTIONS:
+        flag = getattr(args, dest, None)
+        raw = env.get(variable, default if flag is None else flag)
+        values[field] = parse(variable, raw)
+    return Config(**values)  # type: ignore[arg-type]
 
 
 def overridden_flags(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
     """Flags that were passed explicitly but lose to a different env value.
 
-    Call only with a configuration ``resolve_config`` accepts.
+    Only the overridden flag itself is checked: a flag the environment
+    overrides is ignored, so it being invalid is reported, not fatal.
     """
 
-    from_flags = resolve_config(args, {})
-    resolved = resolve_config(args, env)
-    return [
-        f'--{dest} ({variable} is set)'
-        for dest, variable, _, field in _OPTIONS
-        if getattr(args, dest, None) is not None
-        and getattr(from_flags, field) != getattr(resolved, field)
-    ]
+    overridden = []
+    for dest, variable, _, _, parse in _OPTIONS:
+        flag = getattr(args, dest, None)
+        if flag is None or variable not in env:
+            continue
+        try:
+            differs = parse(variable, flag) != parse(variable, env[variable])
+        except ExporterError:
+            differs = True
+        if differs:
+            overridden.append(f'--{dest} ({variable} is set)')
+    return overridden
 
 
 def _port(name: str, value: object) -> int:
@@ -477,28 +453,52 @@ def _port(name: str, value: object) -> int:
     return port
 
 
-def _interval(value: object) -> float:
+def _interval(name: str, value: object) -> float:
     try:
         interval = float(str(value))
     except ValueError as err:
         raise ExporterError(
-            f'TEAMSPEAK_POLL_INTERVAL must be a number of seconds, got {value!r}'
+            f'{name} must be a number of seconds, got {value!r}'
         ) from err
     if not 0 < interval <= MAX_POLL_INTERVAL_IN_SECONDS:
         raise ExporterError(
-            'TEAMSPEAK_POLL_INTERVAL must be more than 0 and at most '
+            f'{name} must be more than 0 and at most '
             f'{MAX_POLL_INTERVAL_IN_SECONDS:g} seconds, got {value!r}'
         )
     return interval
 
 
-def _log_level(value: object) -> str:
+def _log_level(name: str, value: object) -> str:
     level = str(value).upper()
     if level not in LOG_LEVELS:
         raise ExporterError(
-            f'LOG_LEVEL must be one of {", ".join(LOG_LEVELS)}, got {value!r}'
+            f'{name} must be one of {", ".join(LOG_LEVELS)}, got {value!r}'
         )
     return level
+
+
+def _text(name: str, value: object) -> str:
+    return str(value)
+
+
+# Every option: (argparse dest, environment variable, default, Config field,
+# parser). A parser turns a raw flag or environment value into the Config value
+# and raises ExporterError, naming the variable, when it is invalid.
+_OPTIONS: list[tuple[str, str, object, str, Callable[[str, object], object]]] = [
+    ('ts3host', 'TEAMSPEAK_HOST', DEFAULT_TS3_HOST, 'host', _text),
+    ('ts3port', 'TEAMSPEAK_PORT', DEFAULT_TS3_PORT, 'port', _port),
+    ('ts3username', 'TEAMSPEAK_USERNAME', DEFAULT_TS3_USERNAME, 'username', _text),
+    ('ts3password', 'TEAMSPEAK_PASSWORD', DEFAULT_TS3_PASSWORD, 'password', _text),
+    ('metricsport', 'METRICS_PORT', DEFAULT_METRICS_PORT, 'metrics_port', _port),
+    (
+        'pollinterval',
+        'TEAMSPEAK_POLL_INTERVAL',
+        DEFAULT_POLL_INTERVAL_IN_SECONDS,
+        'poll_interval',
+        _interval,
+    ),
+    ('loglevel', 'LOG_LEVEL', DEFAULT_LOG_LEVEL, 'log_level', _log_level),
+]
 
 
 def describe_settings(config: Config) -> str:
