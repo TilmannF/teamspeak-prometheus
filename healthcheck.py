@@ -16,11 +16,13 @@ reachable is deliberately not part of it: that is what
 not get the exporter restarted.
 
 The exporter's command line may contain ``--ts3password``. Nothing read from
-it is ever printed.
+it is ever printed, and the output is censored with every password given to
+the exporter: a port number can be the password.
 """
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import os
@@ -128,13 +130,37 @@ def check(
     return port
 
 
-def main() -> int:
+def exporter_secrets(env: Mapping[str, str], proc: Path = PROC) -> list[str]:
+    """Every password given to the exporter, via its flags or the environment.
+
+    The healthcheck output ends up in ``docker inspect``, and a port number can
+    be the password, so it is censored like the exporter's log.
+    """
+
     try:
-        port = check(os.environ)
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            args = app.parse_args(exporter_argv(proc) or [])
+    except SystemExit:
+        args = argparse.Namespace()
+    return app.secrets_for_redaction(app.password_candidates(args, env))
+
+
+def main(
+    env: Mapping[str, str] | None = None,
+    proc: Path = PROC,
+    prober: Callable[[int], None] = probe,
+) -> int:
+    env = os.environ if env is None else env
+    secrets = exporter_secrets(env, proc)
+    try:
+        port = check(env, proc, prober)
     except HealthcheckError as err:
-        print(f'unhealthy: {err}')
+        print(app.redact(f'unhealthy: {err}', secrets))
         return 1
-    print(f'healthy: metrics endpoint on port {port} answers')
+    print(app.redact(f'healthy: metrics endpoint on port {port} answers', secrets))
     return 0
 
 

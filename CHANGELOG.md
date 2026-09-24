@@ -35,7 +35,7 @@ It is the state as shipped: what a user gets if they pull this tag today.
 - Container `HEALTHCHECK` that probes `/metrics` on the port the exporter
   actually uses (`METRICS_PORT` or `--metricsport`), never through a proxy
   from the environment, and deliberately does not depend on TeamSpeak being
-  reachable.
+  reachable. Its output is censored like the exporter's log.
 - Multi-architecture (`linux/amd64`, `linux/arm64`) container images, published
   to GHCR and Docker Hub on tagged release, with build provenance attestation
   and an SBOM.

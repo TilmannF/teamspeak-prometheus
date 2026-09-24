@@ -550,3 +550,134 @@ def test_the_fake_server_never_prints_a_password_equal_to_its_port():
 
     assert 'Fake TS3 ServerQuery listening on' in first_line
     assert port not in first_line
+
+
+# -- no tool prints its password, however it is chosen -------------------------
+#
+# One row per tool and awkward password: equal to the port the tool prints, or
+# looking like an option. A new command-line tool gets a row here.
+
+
+def run_briefly(argv: list[str], env: dict[str, str], seconds: float = 3) -> str:
+    """Run a command for up to ``seconds``, then SIGTERM it; return its output."""
+
+    process = subprocess.Popen(
+        [sys.executable, '-u', *argv],
+        env=app_env(**env),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        return process.communicate(timeout=seconds)[0]
+    except subprocess.TimeoutExpired:
+        process.send_signal(signal.SIGTERM)
+        return process.communicate(timeout=10)[0]
+
+
+def tool_cases() -> list[tuple[str, list[str], dict[str, str], str]]:
+    port = str(free_port())
+    unreachable = str(free_port())
+    dash = '-' + PASSWORD
+    return [
+        (
+            'exporter, password = metrics port',
+            ['app.py'],
+            {
+                'TEAMSPEAK_HOST': '127.0.0.1',
+                'TEAMSPEAK_PORT': unreachable,
+                'TEAMSPEAK_PASSWORD': port,
+                'METRICS_PORT': port,
+            },
+            port,
+        ),
+        (
+            'exporter, password = TeamSpeak port',
+            ['app.py', '--ts3password', unreachable],
+            {
+                'TEAMSPEAK_HOST': '127.0.0.1',
+                'TEAMSPEAK_PORT': unreachable,
+                'METRICS_PORT': port,
+            },
+            unreachable,
+        ),
+        (
+            'exporter, dash password',
+            ['app.py', '--ts3password=' + dash],
+            {
+                'TEAMSPEAK_HOST': '127.0.0.1',
+                'TEAMSPEAK_PORT': unreachable,
+                'METRICS_PORT': port,
+            },
+            dash,
+        ),
+        (
+            'exporter, mistyped flag with dash password',
+            ['app.py', '--ts3pasword', dash],
+            {},
+            dash,
+        ),
+        (
+            'healthcheck, password = metrics port',
+            ['healthcheck.py'],
+            {'TEAMSPEAK_PASSWORD': port, 'METRICS_PORT': port},
+            port,
+        ),
+        (
+            'harness, password = metrics port',
+            [
+                '-m',
+                'tests.exporter_harness',
+                '--metricsport',
+                port,
+                '--ts3password',
+                port,
+                '--iterations',
+                '1',
+                '--interval',
+                '0.2',
+            ],
+            {},
+            port,
+        ),
+        (
+            'harness, dash password',
+            [
+                '-m',
+                'tests.exporter_harness',
+                '--metricsport',
+                port,
+                '--ts3password=' + dash,
+                '--iterations',
+                '1',
+                '--interval',
+                '0.2',
+            ],
+            {},
+            dash,
+        ),
+        (
+            'fake server, password = its port',
+            ['-m', 'tests.fake_ts3_server', '--port', port, '--password', port],
+            {},
+            port,
+        ),
+        (
+            'fake server, mistyped flag with dash password',
+            ['-m', 'tests.fake_ts3_server', '--pasword', dash],
+            {},
+            dash,
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    'case', range(len(tool_cases())), ids=[case[0] for case in tool_cases()]
+)
+def test_no_tool_prints_its_password(case):
+    name, argv, env, secret = tool_cases()[case]
+
+    output = run_briefly(argv, env)
+
+    assert output.strip(), f'{name}: no output at all, the test proves nothing'
+    assert secret not in output, f'{name} printed its password'

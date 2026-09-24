@@ -3,7 +3,8 @@
 #
 # HEALTHCHECK: every supported way of choosing the metrics port, and a proxy in
 # the environment, must end healthy; a container without a running exporter
-# must end unhealthy.
+# must end unhealthy. No health or container log may contain the password, not
+# even where it equals the metrics port.
 #
 # Shutdown: `docker stop` must end the exporter cleanly -- exit code 0 within a
 # few seconds, not a SIGKILL after Docker's 10-second grace period.
@@ -79,6 +80,9 @@ start env-beats-flag -e METRICS_PORT=9200 -- python /app/app.py --metricsport 91
 # it; nothing listens on port 1. The loopback probe must not go through it.
 start behind-proxy -e http_proxy=http://127.0.0.1:1 -e HTTP_PROXY=http://127.0.0.1:1 \
   -e all_proxy=http://127.0.0.1:1 --
+# The password is the metrics port: healthcheck and exporter both print that
+# number, and both must censor it.
+start password-is-port -e METRICS_PORT=9400 -e TEAMSPEAK_PASSWORD=9400 --
 start no-exporter -- sleep 300
 
 expect default healthy
@@ -88,7 +92,25 @@ expect behind-init healthy
 expect shell-wrapper healthy
 expect env-beats-flag healthy
 expect behind-proxy healthy
+expect password-is-port healthy
 expect no-exporter unhealthy
+
+# never_printed NAME VALUE: neither the health log nor the container log may
+# contain VALUE.
+never_printed() {
+  local name="$PREFIX-$1" output
+  output="$(docker inspect --format '{{range .State.Health.Log}}{{.Output}}{{end}}' "$name")"
+  output+="$(docker logs "$name" 2>&1)"
+  if [[ "$output" == *"$2"* ]]; then
+    echo "FAIL $1: the password appears in the health or container log"
+    FAILED=1
+  else
+    echo "ok   $1: password never printed"
+  fi
+}
+
+never_printed password-is-port 9400
+never_printed metrics-port-flag "$SECRET"
 
 # stopped NAME: docker stop must finish fast with exit code 0 and a clean log.
 stopped() {

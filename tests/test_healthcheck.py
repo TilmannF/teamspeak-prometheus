@@ -212,18 +212,64 @@ def test_a_failing_probe_propagates(tmp_path):
         healthcheck.check({}, proc, refuse)
 
 
-def test_main_reports_unhealthy_with_exit_code_1(monkeypatch, capsys):
-    def unhealthy(env):
-        raise healthcheck.HealthcheckError('nothing listens')
+def test_main_reports_unhealthy_with_exit_code_1(tmp_path, capsys):
+    proc = fake_proc(tmp_path, {1: ['python', '/app/app.py']})
 
-    monkeypatch.setattr(healthcheck, 'check', unhealthy)
+    def refuse(port: int) -> None:
+        raise healthcheck.HealthcheckError(f'port {port} refused')
 
-    assert healthcheck.main() == 1
-    assert 'unhealthy: nothing listens' in capsys.readouterr().out
+    assert healthcheck.main(env={}, proc=proc, prober=refuse) == 1
+    assert 'unhealthy: port 8000 refused' in capsys.readouterr().out
 
 
-def test_main_reports_healthy_with_exit_code_0(monkeypatch, capsys):
-    monkeypatch.setattr(healthcheck, 'check', lambda env: 9100)
+def test_main_reports_healthy_with_exit_code_0(tmp_path, capsys):
+    proc = fake_proc(tmp_path, {1: ['python', '/app/app.py', '--metricsport', '9100']})
 
-    assert healthcheck.main() == 0
-    assert 'port 9100' in capsys.readouterr().out
+    assert healthcheck.main(env={}, proc=proc, prober=lambda port: None) == 0
+    assert 'port 9100 answers' in capsys.readouterr().out
+
+
+# -- the password never reaches the healthcheck output ------------------------
+
+
+def test_every_password_given_to_the_exporter_is_a_secret(tmp_path):
+    proc = fake_proc(
+        tmp_path, {1: ['python', '/app/app.py', '--ts3password', 'from-flag']}
+    )
+
+    assert set(
+        healthcheck.exporter_secrets({'TEAMSPEAK_PASSWORD': 'from-env'}, proc)
+    ) == {'from-flag', 'from-env'}
+
+
+def test_secrets_survive_an_invalid_exporter_command_line(tmp_path):
+    proc = fake_proc(tmp_path, {1: ['python', '/app/app.py', '--bogus']})
+
+    assert healthcheck.exporter_secrets({'TEAMSPEAK_PASSWORD': 'x'}, proc) == ['x']
+
+
+@pytest.mark.parametrize(
+    ('argv', 'env'),
+    [
+        (['--metricsport', '9100', '--ts3password', '9100'], {}),
+        ([], {'METRICS_PORT': '9100', 'TEAMSPEAK_PASSWORD': '9100'}),
+    ],
+    ids=['flag', 'environment'],
+)
+@pytest.mark.parametrize('healthy', [True, False])
+def test_a_password_equal_to_the_port_is_never_printed(
+    tmp_path, capsys, argv, env, healthy
+):
+    proc = fake_proc(tmp_path, {1: ['python', '/app/app.py', *argv]})
+
+    def prober(port: int) -> None:
+        if not healthy:
+            raise healthcheck.HealthcheckError(
+                f'http://127.0.0.1:{port}/metrics did not answer'
+            )
+
+    healthcheck.main(env=env, proc=proc, prober=prober)
+
+    out = capsys.readouterr().out
+    assert '9100' not in out
+    assert '*censored*' in out

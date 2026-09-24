@@ -66,6 +66,8 @@ Text from the TeamSpeak server is untrusted. It reaches the log only as argument
 
 This rule is not scoped to `app.py`. Test support, fakes, harnesses and scripts MUST NOT print a password either, even a fixture one — an exception that is visible in the tree is an exception the next change will copy.
 
+Every command-line tool in this repository is listed in `tool_cases()` in `tests/test_smoke.py`, which runs it with passwords that collide with its output (a port number, a dash-prefixed value) and fails if any output contains them. A new tool gets a row there.
+
 Never commit a real host, password, or ServerQuery credential. Test fixtures use fake values.
 
 ## Architecture

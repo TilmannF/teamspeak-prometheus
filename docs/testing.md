@@ -81,12 +81,13 @@ Replace `virtualserver_unique_identifier` before committing.
 
 ## The container test
 
-`make docker-test` builds the image and starts it eight ways — default,
+`make docker-test` builds the image and starts it nine ways — default,
 `METRICS_PORT`, `--metricsport` in the command, behind `--init`, behind
 `sh -c`, env and flag both set, with an unreachable HTTP proxy in the
-environment, and without an exporter — then waits for Docker's verdict on
-each. The first seven must turn healthy, the last unhealthy,
-and no healthcheck output may contain the password passed in one of them. CI
+environment, with the password equal to the metrics port, and without an
+exporter — then waits for Docker's verdict on each. All but the last must turn
+healthy, the last unhealthy, and neither the health log nor the container log
+may contain the password, not even where it equals the port. CI
 runs it in the `docker` job. It takes about 20 seconds and needs no TeamSpeak
 server.
 
@@ -94,6 +95,14 @@ It then stops three of them — default, behind `--init`, behind `sh -c` — wit
 `docker stop`, and requires exit code 0 within 5 seconds and `Stopped` in the
 log. Without a SIGTERM handler the exporter, as PID 1, would ignore the signal
 and be killed after Docker's 10-second grace period (exit code 137).
+
+## No tool prints its password
+
+`tests/test_smoke.py::test_no_tool_prints_its_password` runs every command-line
+tool — the exporter, the healthcheck, the harness, the fake server — with
+awkward passwords: equal to a port the tool prints, or starting with `-`, or
+after a mistyped flag. No output may contain the password. **A new
+command-line tool gets a row in `tool_cases()`.**
 
 ## Adding a metric
 

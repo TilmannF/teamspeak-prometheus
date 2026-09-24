@@ -171,9 +171,10 @@ probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout,
 * Without an exporter process (a replaced container command) the port comes
   from the environment alone, like an exporter started without flags.
 * The exporter's command line may contain `--ts3password`. argparse error
-  output is swallowed and error messages never repeat an argument, so the
-  healthcheck output — stored by Docker and visible via `docker inspect` —
-  cannot contain it.
+  output is swallowed and error messages never repeat an argument, and the
+  output is censored with every password given to the exporter (flag and
+  environment), so the healthcheck output — stored by Docker and visible via
+  `docker inspect` — cannot contain it, not even as a port number.
 * Proxy variables (`http_proxy`, `HTTP_PROXY`, `all_proxy`) are ignored. The
   healthcheck inherits the container environment, Docker can inject proxy
   settings into every container, and urllib would otherwise send the loopback
