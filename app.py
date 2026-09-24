@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import enum
 import logging
+import math
 import os
 import re
 import signal
@@ -60,6 +61,10 @@ MAX_BACKOFF_IN_SECONDS = 60.0
 # Upper bound for the poll interval. Anything slower is not monitoring, and far
 # larger values overflow time.sleep().
 MAX_POLL_INTERVAL_IN_SECONDS = 86400.0
+# Lower bound. Faster is not monitoring, and one poll is at least five
+# ServerQuery commands: even 1s trips TeamSpeak's default flood protection
+# (10 commands per 3s) unless the exporter's IP is on the allowlist.
+MIN_POLL_INTERVAL_IN_SECONDS = 1.0
 # TeamSpeak throttles query clients that are not on its allowlist (default: 10
 # commands per 3 seconds) and answers ``error id=524``. The exporter waits as
 # told and retries the command this many times before giving up on it.
@@ -491,8 +496,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         '--pollinterval',
-        help='Seconds between two polls of the TS3 server, at most '
-        f'{MAX_POLL_INTERVAL_IN_SECONDS:g} '
+        help='Seconds between two polls of the TS3 server, '
+        f'{MIN_POLL_INTERVAL_IN_SECONDS:g} to {MAX_POLL_INTERVAL_IN_SECONDS:g} '
         f'(default: {DEFAULT_POLL_INTERVAL_IN_SECONDS:g})',
     )
     parser.add_argument(
@@ -565,9 +570,9 @@ def _interval(name: str, value: object) -> float:
         raise ExporterError(
             f'{name} must be a number of seconds, got {value!r}'
         ) from err
-    if not 0 < interval <= MAX_POLL_INTERVAL_IN_SECONDS:
+    if not MIN_POLL_INTERVAL_IN_SECONDS <= interval <= MAX_POLL_INTERVAL_IN_SECONDS:
         raise ExporterError(
-            f'{name} must be more than 0 and at most '
+            f'{name} must be at least {MIN_POLL_INTERVAL_IN_SECONDS:g} and at most '
             f'{MAX_POLL_INTERVAL_IN_SECONDS:g} seconds, got {value!r}'
         )
     return interval
@@ -950,12 +955,21 @@ class Teamspeak3MetricService:
 
 
 def next_delay(interval: float, consecutive_failures: int) -> float:
-    """Wait before the next poll: the interval, doubled per failure, capped."""
+    """Wait before the next poll: the interval, doubled per failure, capped.
+
+    ``interval`` must be positive. Doubling continues until the cap for any
+    positive interval, however small: the number of doublings is bounded by the
+    number actually needed to reach the cap, and ``ldexp`` scales by powers of
+    two without an intermediate result that could overflow.
+    """
 
     if consecutive_failures == 0:
         return interval
     cap = max(interval, MAX_BACKOFF_IN_SECONDS)
-    return min(interval * 2 ** min(consecutive_failures, 16), cap)
+    # log2(cap) - log2(interval), not log2(cap / interval): the quotient
+    # overflows to infinity for a subnormal interval.
+    needed = math.ceil(math.log2(cap) - math.log2(interval))
+    return min(math.ldexp(interval, min(consecutive_failures, needed)), cap)
 
 
 def poll_forever(

@@ -488,3 +488,26 @@ def test_a_partial_poll_does_not_back_off():
 )
 def test_backoff_is_capped_but_never_below_the_interval(interval, failures, expected):
     assert app.next_delay(interval, failures) == expected
+
+
+def test_backoff_reaches_the_cap_from_the_shortest_allowed_interval():
+    delays = [app.next_delay(app.MIN_POLL_INTERVAL_IN_SECONDS, n) for n in range(1, 10)]
+
+    assert delays == [2, 4, 8, 16, 32, 60, 60, 60, 60]
+
+
+@pytest.mark.parametrize('interval', [1e-6, 1e-300, 5e-324])
+def test_backoff_reaches_the_cap_even_from_tiny_intervals(interval):
+    # Not configurable, but the backoff must not depend on that: it keeps
+    # doubling until the cap instead of stopping after a fixed number of steps.
+    assert app.next_delay(interval, 10_000) == app.MAX_BACKOFF_IN_SECONDS
+
+
+@pytest.mark.parametrize('interval', [5e-324, 1, 59.9, 86400])
+@pytest.mark.parametrize('failures', [1, 1_023, 1_024, 1_100, 10**9])
+def test_backoff_never_overflows_or_exceeds_its_cap(interval, failures):
+    delay = app.next_delay(interval, failures)
+
+    assert interval < delay <= max(interval, app.MAX_BACKOFF_IN_SECONDS) or (
+        delay == interval == 86400
+    )

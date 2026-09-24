@@ -10,6 +10,7 @@ ignored, so a stray ``TEAMSPEAK_HOST`` cannot point a test at a real server.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 
 from prometheus_client import CollectorRegistry, start_http_server
 
@@ -36,12 +37,14 @@ def run(
                 ts3_password,
                 '--metricsport',
                 str(metrics_port),
-                '--pollinterval',
-                str(interval_in_seconds),
             ]
         ),
         env={},
     )
+    # Tests poll faster than the exporter's 1-second minimum allows. The
+    # interval goes straight to the poll loop, past configuration validation;
+    # the banner still shows the interval actually used.
+    config = dataclasses.replace(config, poll_interval=interval_in_seconds)
     app.configure_logging(config.log_level, secrets=[config.password])
     app.log.info(app.describe_settings(config))
 

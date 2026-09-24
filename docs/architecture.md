@@ -99,6 +99,11 @@ A poll that **fails** keeps every existing series at its last value and sets
 `teamspeak_exporter_last_successful_poll_timestamp_seconds` to catch stale
 data. Backoff doubles the wait per consecutive failed poll, capped at
 `max(60s, poll interval)`, and resets on the next poll that reaches the server.
+The poll interval itself is 1 to 86400 seconds: below 1s the exporter would
+hammer ServerQuery. Even inside that range, `3 + 2 × virtualservers` commands
+per poll against TeamSpeak's default of 10 per 3 seconds means a
+non-allowlisted exporter with one virtualserver is throttled below 1.5s, and
+earlier with more.
 A **partial** poll does not back off.
 
 ## Untrusted server text: logs and labels

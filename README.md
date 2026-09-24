@@ -70,7 +70,7 @@ the exporter logs a warning for every flag an environment variable overrides.
 | `TEAMSPEAK_USERNAME` | ServerQuery username of TS3 server | *serveradmin* |
 | `TEAMSPEAK_PASSWORD` | ServerQuery password of TS3 server |  |
 | `METRICS_PORT` | Port on which this service exposes the metrics | *8000* |
-| `TEAMSPEAK_POLL_INTERVAL` | Seconds between two polls of the TS3 server, at most 86400 | *5* |
+| `TEAMSPEAK_POLL_INTERVAL` | Seconds between two polls of the TS3 server, 1 to 86400 | *5* |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
 ### Command-line arguments
@@ -84,7 +84,7 @@ List all arguments with `python app.py -h`.
 | `--ts3username` | ServerQuery username of TS3 server | *serveradmin* |
 | `--ts3password` | ServerQuery password of TS3 server |  |
 | `--metricsport` | Port on which this service exposes the metrics | *8000* |
-| `--pollinterval` | Seconds between two polls of the TS3 server, at most 86400 | *5* |
+| `--pollinterval` | Seconds between two polls of the TS3 server, 1 to 86400 | *5* |
 | `--loglevel` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
 Flags are only checked when they are used: a malformed flag that an
@@ -100,8 +100,9 @@ readable by the same user, root, or `docker inspect` on the container.
 TeamSpeak throttles query clients that are not on its allowlist — by default
 10 commands per 3 seconds. One poll needs `3 + 2 × virtualservers` commands.
 The exporter waits and retries when throttled, but on a host with several
-virtualservers, add the exporter's IP to `query_ip_allowlist.txt` on the
-TeamSpeak server. If TeamSpeak has already banned the IP, the exporter logs
+virtualservers — or a short poll interval: with one virtualserver, anything
+under 1.5 seconds is throttled — add the
+exporter's IP to `query_ip_allowlist.txt` on the TeamSpeak server. If TeamSpeak has already banned the IP, the exporter logs
 `closed the connection before greeting` until the ban expires (default 10
 minutes).
 

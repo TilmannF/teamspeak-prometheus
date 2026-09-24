@@ -17,6 +17,8 @@ the usual port 8000; pass extra flags through `RUN_FAKE_ARGS`:
 ```bash
 make run-fake RUN_FAKE_ARGS="--metricsport 8231"
 make run-fake RUN_FAKE_ARGS="--iterations 2 --interval 0.2"   # what CI runs
+# the harness hands --interval straight to the poll loop, so it may go below
+# the exporter's 1-second minimum
 make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 ```
 

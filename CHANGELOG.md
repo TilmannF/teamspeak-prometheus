@@ -17,7 +17,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
 
 ### Added
 
-- `--pollinterval` / `TEAMSPEAK_POLL_INTERVAL` (default 5 seconds, unchanged)
+- `--pollinterval` / `TEAMSPEAK_POLL_INTERVAL` (default 5 seconds, unchanged;
+  1 to 86400 seconds)
   and `--loglevel` / `LOG_LEVEL`.
 - Exporter self-metrics: `teamspeak_exporter_last_poll_timestamp_seconds`,
   `teamspeak_exporter_last_successful_poll_timestamp_seconds`,

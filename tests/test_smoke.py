@@ -249,7 +249,7 @@ def scrape_app(
     port = free_port()
     process = subprocess.Popen(
         [sys.executable, '-u', 'app.py', *argv],
-        env=app_env(METRICS_PORT=str(port), TEAMSPEAK_POLL_INTERVAL='0.2', **env),
+        env=app_env(METRICS_PORT=str(port), TEAMSPEAK_POLL_INTERVAL='1', **env),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

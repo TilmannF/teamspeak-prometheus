@@ -78,6 +78,15 @@ def test_ports_from_the_environment_are_integers():
     assert config.metrics_port == 9000
 
 
+def test_a_poll_interval_of_one_second_is_allowed():
+    assert resolve(TEAMSPEAK_POLL_INTERVAL='1').poll_interval == 1
+
+
+def test_a_too_short_poll_interval_names_the_limits():
+    with pytest.raises(app.ExporterError, match='at least 1 and at most 86400'):
+        resolve(TEAMSPEAK_POLL_INTERVAL='0.5')
+
+
 def test_a_poll_interval_of_one_day_is_allowed():
     assert resolve(TEAMSPEAK_POLL_INTERVAL='86400').poll_interval == 86400
 
@@ -95,6 +104,9 @@ def test_a_fractional_poll_interval_is_allowed():
         ('TEAMSPEAK_POLL_INTERVAL', 'soon'),
         ('TEAMSPEAK_POLL_INTERVAL', '0'),
         ('TEAMSPEAK_POLL_INTERVAL', '-5'),
+        ('TEAMSPEAK_POLL_INTERVAL', '0.000001'),
+        ('TEAMSPEAK_POLL_INTERVAL', '0.5'),
+        ('TEAMSPEAK_POLL_INTERVAL', '0.999'),
         ('TEAMSPEAK_POLL_INTERVAL', 'nan'),
         ('TEAMSPEAK_POLL_INTERVAL', 'inf'),
         ('TEAMSPEAK_POLL_INTERVAL', '1e10'),
