@@ -24,7 +24,9 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    `teamspeak_exporter_build_info` reports.
 2. Commit that on a branch, get it reviewed and merged to `master` like any
    other change.
-3. From `master`, tag and push:
+3. From `master`, tag and push. Release tags are exactly `vMAJOR.MINOR.PATCH`
+   (no prerelease or build suffix, no leading zeros); the release workflow
+   fails on anything else before publishing:
 
    ```bash
    git tag vX.Y.Z

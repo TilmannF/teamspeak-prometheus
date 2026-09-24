@@ -60,30 +60,19 @@ jobs:
         id: ghcr
         run: echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      # The tag trigger 'v*.*.*' also matches non-semver tags such as
-      # v1.2.foo, which contain no "-" and would otherwise still pass the
-      # prerelease check below. Validate strictly so a malformed tag can't
-      # overwrite "latest" or produce a wrongly-labelled GitHub Release.
-      - name: Parse release tag
-        id: version
+      # The tag trigger 'v*.*.*' also matches tags that are not plain
+      # versions (v1.2.foo, v1.2.3-rc.1, v01.2.3). Releases use exactly
+      # vMAJOR.MINOR.PATCH -- SemVer without prerelease or build metadata, no
+      # leading zeros -- and anything else fails here, before a single image
+      # or release is published.
+      - name: Validate release tag
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          ref="${{ github.ref_name }}"
-          # SemVer forbids a leading zero in major/minor/patch (except "0"
-          # itself), so each is (0|[1-9][0-9]*) rather than plain [0-9]+.
-          # Prerelease is read from capture group 4 -- not a whole-string "-"
-          # scan -- so build metadata (after "+") can contain a hyphen, e.g.
-          # v1.2.3+linux-amd64, without being mistaken for a prerelease.
-          semver_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
-          if [[ "${{ github.event_name }}" == "push" && "$ref" =~ $semver_re ]]; then
-            echo "valid=true" >> "$GITHUB_OUTPUT"
-            if [[ -n "${BASH_REMATCH[4]}" ]]; then
-              echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "valid=false" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::'$TAG' is not a release tag; expected vMAJOR.MINOR.PATCH, e.g. v1.2.3"
+            exit 1
           fi
 
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -116,7 +105,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && steps.version.outputs.valid == 'true' && steps.version.outputs.prerelease == 'false' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
 
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         id: build
@@ -140,4 +129,3 @@ jobs:
         if: github.event_name == 'push' && steps.dry_run.outputs.value != 'true'
         with:
           generate_release_notes: true
-          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
