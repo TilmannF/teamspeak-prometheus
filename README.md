@@ -117,6 +117,27 @@ services:
       - 8000:8000
 ```
 
+### Container health
+
+The image runs as a non-root user (UID 10001) and has a Docker `HEALTHCHECK`.
+Healthy means the metrics endpoint answers — on whichever port the exporter
+actually uses, whether set with `METRICS_PORT` or with `--metricsport` in an
+overridden container command, also behind `--init` or a shell wrapper.
+
+The container stays healthy while TeamSpeak is unreachable, on purpose: a
+TeamSpeak outage should not get the exporter restarted. Alert on
+`teamspeak_exporter_poll_success` or
+`teamspeak_exporter_last_successful_poll_timestamp_seconds` for that instead.
+
+The result of the last checks, including the port probed, is shown by:
+
+```bash
+docker inspect --format '{{json .State.Health}}' <container>
+```
+
+Kubernetes ignores Docker's `HEALTHCHECK`; there, use an HTTP `livenessProbe`
+on `/metrics` and the metrics port.
+
 ### Prometheus scrape config
 
 ```yaml
@@ -140,10 +161,6 @@ Every TeamSpeak metric is prefixed with `teamspeak_` and labelled with
 alerting rules are keyed on them, and a rename or removal is a breaking
 change (see [CHANGELOG.md](CHANGELOG.md)).
 
-The container image runs as a non-root user and has a `HEALTHCHECK` on the
-metrics endpoint. It stays healthy while TeamSpeak is unreachable — that is
-what `teamspeak_exporter_poll_success` is for.
-
 A Grafana dashboard demonstrating a subset of the metrics is committed at
 `grafana-dashboard.json`.
 
@@ -156,6 +173,7 @@ ships a fake ServerQuery server.
 make setup     # virtualenv + runtime and dev dependencies
 make check     # lint, format check, unit tests
 make run-fake  # run the exporter against the fake TS3 server
+make docker-healthcheck  # build the image and test its healthcheck (needs Docker)
 ```
 
 See [docs/testing.md](docs/testing.md) for details, [docs/architecture.md](docs/architecture.md)

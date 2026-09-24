@@ -7,6 +7,7 @@ make setup        # .venv with runtime + dev dependencies
 make check        # ruff check, ruff format --check, unit tests
 make test-smoke   # end-to-end against the fake ServerQuery server
 make run-fake     # run the exporter locally and scrape it by hand
+make docker-healthcheck  # build the image, test its HEALTHCHECK (needs Docker)
 ```
 
 `make run-fake` starts a fake TeamSpeak ServerQuery interface and the real
@@ -33,7 +34,9 @@ make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 | `tests/test_config.py` | Defaults, environment precedence, validation, override warnings |
 | `tests/test_metrics.py` | The metric contract: names, prefix, label, values, self-metrics |
 | `tests/test_service.py` | Poll sequence, error survival, series lifecycle, backoff |
-| `tests/test_smoke.py` | Subprocess boot → scrape `/metrics`, flood and outage survival |
+| `tests/test_smoke.py` | Subprocess boot → scrape `/metrics`, flood and outage survival, healthcheck probe |
+| `tests/test_healthcheck.py` | `healthcheck.py` against a fake `/proc`: finding the exporter, port resolution, no secret leaks |
+| `tests/container_healthcheck.sh` | The built image's `HEALTHCHECK` in every port configuration, via `make docker-healthcheck` |
 
 ## Markers
 
@@ -66,6 +69,16 @@ docker run -d --name ts3 -p 127.0.0.1:10011:10011 \
 ```
 
 Replace `virtualserver_unique_identifier` before committing.
+
+## The container healthcheck
+
+`make docker-healthcheck` builds the image and starts it seven ways — default,
+`METRICS_PORT`, `--metricsport` in the command, behind `--init`, behind
+`sh -c`, env and flag both set, and without an exporter — then waits for
+Docker's verdict on each. The first six must turn healthy, the last unhealthy,
+and no healthcheck output may contain the password passed in one of them. CI
+runs it in the `docker` job. It takes about 20 seconds and needs no TeamSpeak
+server.
 
 ## Adding a metric
 

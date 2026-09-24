@@ -92,6 +92,7 @@ make check        # ruff check, ruff format --check, unit tests
 make test-smoke   # end-to-end against the fake ServerQuery server
 make run-fake     # run the exporter locally, no TeamSpeak server needed
 make docker-build # verify the image still builds
+make docker-healthcheck # build the image and test its HEALTHCHECK end to end
 ```
 
 No real TeamSpeak server is required to develop or verify anything in this repository. `tests/fake_ts3_server.py` is a real TCP ServerQuery stub.
@@ -153,6 +154,7 @@ Runtime deps:        prometheus_client only; ServerQuery client is in app.py
 Linter/formatter:    ruff
 Tests:               pytest
 Entry point:         app.py (single module, intentionally)
+Healthcheck:         healthcheck.py, container-only, reuses app's config resolution
 Poll interval:       5s, --pollinterval / TEAMSPEAK_POLL_INTERVAL
 Container:           python:3.14-alpine, non-root
 Metrics port:        8000

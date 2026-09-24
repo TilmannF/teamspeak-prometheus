@@ -16,6 +16,7 @@ import pytest
 import requests
 
 import app
+import healthcheck
 from tests.fake_ts3_server import FakeTs3Server, virtualservers
 
 pytestmark = pytest.mark.smoke
@@ -188,3 +189,15 @@ def test_the_client_reads_the_fake_server_directly():
 
     assert [s['virtualserver_name'] for s in listed] == names()
     assert all(name in info for name in app.METRICS_NAMES)
+
+
+def test_the_healthcheck_probe_accepts_a_live_metrics_endpoint(exporter):
+    _, port = exporter
+    scrape(port, names())
+
+    healthcheck.probe(port)
+
+
+def test_the_healthcheck_probe_rejects_a_closed_port():
+    with pytest.raises(healthcheck.HealthcheckError, match='did not answer'):
+        healthcheck.probe(free_port())

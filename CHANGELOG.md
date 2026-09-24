@@ -26,7 +26,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
   `teamspeak_exporter_missing_fields{virtualserver_name}`,
   `teamspeak_exporter_build_info{version}`.
 - A warning at startup for every flag an environment variable overrides.
-- Container `HEALTHCHECK`.
+- Container `HEALTHCHECK` that probes `/metrics` on the port the exporter
+  actually uses (`METRICS_PORT` or `--metricsport`), and deliberately does not
+  depend on TeamSpeak being reachable.
 - Multi-architecture (`linux/amd64`, `linux/arm64`) container images, published
   to GHCR and Docker Hub on tagged release, with build provenance attestation
   and an SBOM.

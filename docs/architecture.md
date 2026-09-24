@@ -93,6 +93,38 @@ After every poll that got a `serverlist`, the series of virtualservers that are
 no longer listed (deleted, or skipped because they failed) are removed. A
 missing `serverinfo` field removes just that series.
 
+## Container healthcheck
+
+Docker runs `HEALTHCHECK` as a separate process in the container. It inherits
+the container's environment, but not the exporter's command-line flags, so
+probing `METRICS_PORT` (or 8000) alone would declare an exporter started with
+`--metricsport` permanently unhealthy.
+
+`healthcheck.py` closes that gap without duplicating any configuration logic:
+
+```text
+exporter_argv(/proc)        every /proc/<pid>/cmdline, lowest PID first,
+                            skipping itself; the arguments after app.py
+metrics_port(argv, env)     app.parse_args + app.resolve_config:
+                            the exporter's own precedence rules
+probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout
+```
+
+* All processes are searched, not only PID 1, so `docker run --init` and
+  `sh -c` wrappers work. A shell's `-c` string is one argument and does not
+  match; its child does.
+* Without an exporter process (a replaced container command) the port comes
+  from the environment alone, like an exporter started without flags.
+* The exporter's command line may contain `--ts3password`. argparse error
+  output is swallowed and error messages never repeat an argument, so the
+  healthcheck output — stored by Docker and visible via `docker inspect` —
+  cannot contain it.
+* The healthcheck runs as the same non-root user as the exporter, which is what
+  allows it to read the exporter's `/proc` entry.
+* Healthy is deliberately independent of TeamSpeak. An orchestrator that
+  restarts unhealthy containers must not restart the exporter because
+  TeamSpeak is down; `teamspeak_exporter_poll_success` reports that.
+
 ## Configuration precedence
 
 Environment variables win over command-line arguments. That is long-standing

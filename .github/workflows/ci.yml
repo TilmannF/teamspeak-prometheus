@@ -58,13 +58,13 @@ jobs:
         run: make test-smoke
 
   docker:
-    name: docker build
+    name: docker build + healthcheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Build image
-        run: docker build -t teamspeak-prometheus:ci .
+      - name: make docker-healthcheck
+        run: make docker-healthcheck
 
   dependency-review:
     name: dependency review
