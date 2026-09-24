@@ -762,6 +762,8 @@ class Teamspeak3MetricService:
         self._warned_missing: set[tuple[str, str]] = set()
         # virtualserver id -> status, for those serverlist reports not online
         self._not_online: dict[str, str] = {}
+        # names shared by several virtualservers, already warned about
+        self._warned_duplicates: set[str] = set()
 
     def poll(self) -> PollResult:
         metrics = self.exporter_metrics
@@ -806,6 +808,7 @@ class Teamspeak3MetricService:
             result = PollResult.OK
             seen: set[str] = set()
             not_online: dict[str, str] = {}
+            owners: dict[str, list[str]] = {}
             for server in servers:
                 virtualserver_id = server.get('virtualserver_id')
                 status = server.get('virtualserver_status')
@@ -829,12 +832,35 @@ class Teamspeak3MetricService:
                 )
                 self._record(name, serverinfo)
                 seen.add(name)
+                owners.setdefault(name, []).append(str(virtualserver_id))
+            self._report_duplicates(owners)
             self._report_status_changes(not_online, servers)
             self._forget(self.known_virtualservers - seen)
             self.known_virtualservers = seen
             return result
         finally:
             client.close()
+
+    def _report_duplicates(self, owners: dict[str, list[str]]) -> None:
+        """Warn once per name shared by several virtualservers.
+
+        ``virtualserver_name`` is the only label, so they write the same series
+        and the last one read wins. Telling them apart needs a
+        ``virtualserver_id`` label -- a breaking change, see
+        docs/modernization-backlog.md.
+        """
+
+        duplicates = {name: ids for name, ids in owners.items() if len(ids) > 1}
+        for name, ids in duplicates.items():
+            if name not in self._warned_duplicates:
+                log.warning(
+                    "Virtualservers %s are all named '%s'; they share one set of "
+                    'series and only the last one read is exported. Give them '
+                    'distinct names.',
+                    ', '.join(ids),
+                    name,
+                )
+        self._warned_duplicates = set(duplicates)
 
     def _report_status_changes(
         self, not_online: dict[str, str], servers: list[dict[str, str | None]]

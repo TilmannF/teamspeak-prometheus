@@ -83,6 +83,9 @@ not be read — disappears from the next poll's output. A stopped virtualserver
 is a state of the host, not an exporter error: it does not affect
 `teamspeak_exporter_poll_success`.
 
+Virtualservers with identical names write the same series; only the last one
+read is exported, and the exporter logs a warning. Give them distinct names.
+
 If a `serverinfo` field is missing or not a number, only that series is left
 out; the rest of the virtualserver is still exported and
 `teamspeak_exporter_missing_fields` counts the gap.

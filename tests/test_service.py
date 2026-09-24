@@ -223,6 +223,65 @@ def test_a_virtualserver_without_a_status_is_read():
     assert setup.calls('use') == [('use', 1), ('use', 2)]
 
 
+def same_name(count: int = 2) -> list[dict[str, object]]:
+    return [
+        {'virtualserver_id': sid, 'virtualserver_name': 'TeamSpeak ]I[ Server'}
+        for sid in range(1, count + 1)
+    ]
+
+
+def test_virtualservers_sharing_a_name_are_warned_about_once(caplog):
+    setup = Setup(servers=same_name(3))
+
+    setup.service.poll()
+    setup.service.poll()
+
+    warnings = [
+        r.getMessage() for r in caplog.records if 'are all named' in r.getMessage()
+    ]
+    assert warnings == [
+        "Virtualservers 1, 2, 3 are all named 'TeamSpeak ]I[ Server'; they share "
+        'one set of series and only the last one read is exported. Give them '
+        'distinct names.'
+    ]
+
+
+def test_the_last_virtualserver_read_wins_a_shared_name():
+    setup = Setup(servers=same_name())
+
+    assert setup.service.poll() is app.PollResult.OK
+
+    series = [
+        sample
+        for metric in setup.registry.collect()
+        if metric.name == 'teamspeak_virtualserver_uptime'
+        for sample in metric.samples
+    ]
+    assert len(series) == 1
+    assert series[0].value == 2000 + app.METRICS_NAMES.index('virtualserver_uptime')
+
+
+def test_a_duplicate_name_that_returns_is_warned_about_again(caplog):
+    setup = Setup(servers=same_name())
+    setup.service.poll()
+    setup.client.servers = [
+        {'virtualserver_id': 1, 'virtualserver_name': 'TeamSpeak ]I[ Server'},
+        {'virtualserver_id': 2, 'virtualserver_name': 'Renamed'},
+    ]
+    setup.service.poll()
+    setup.client.servers = same_name()
+
+    setup.service.poll()
+
+    assert sum('are all named' in r.getMessage() for r in caplog.records) == 2
+
+
+def test_distinct_names_are_not_warned_about(caplog):
+    Setup().service.poll()
+
+    assert not any('are all named' in r.getMessage() for r in caplog.records)
+
+
 def test_an_unexpected_exception_does_not_escape_the_poll():
     def broken(host: str, port: int):
         raise RuntimeError('boom')

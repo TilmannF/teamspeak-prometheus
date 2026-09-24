@@ -80,5 +80,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
 - The exporter stops cleanly on SIGTERM. As PID 1 in the container it used to
   ignore it, so `docker stop` waited 10 seconds and killed it.
 - A malformed ServerQuery error line is an error, not success.
+- Virtualservers sharing a name are warned about; their metrics collide
+  because `virtualserver_name` is the only label (see
+  `docs/modernization-backlog.md`).
 
 [1.0.0]: https://github.com/TilmannF/teamspeak-prometheus/releases/tag/v1.0.0

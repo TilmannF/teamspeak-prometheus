@@ -124,7 +124,8 @@ text. That over-censors, but never leaks.
 
 After every poll that got a `serverlist`, the series of virtualservers that
 were not read are removed: deleted ones, ones not `online`, and ones that failed
-this poll. A
+this poll. Virtualservers sharing a name share their series — the last one
+read wins — and are warned about once per name. A
 missing `serverinfo` field removes just that series.
 
 ## Container healthcheck
