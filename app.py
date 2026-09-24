@@ -425,8 +425,11 @@ class Config:
     log_level: str = DEFAULT_LOG_LEVEL
 
 
-class _ArgumentParser(argparse.ArgumentParser):
+class SafeArgumentParser(argparse.ArgumentParser):
     """An ``ArgumentParser`` whose error messages never repeat a value.
+
+    Every command-line parser in this repository uses it -- the exporter, the
+    test harness, the fake server -- and tests/test_cli.py fails on any other.
 
     argparse quotes command-line fragments in its errors -- ``unrecognized
     arguments: --ts3pasword <password>`` after a typo, ``ambiguous option:
@@ -471,7 +474,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     Unset flags stay ``None`` so that precedence can be traced.
     """
 
-    parser = _ArgumentParser()
+    parser = SafeArgumentParser()
     parser.add_argument(
         '--ts3host',
         help=f'Hostname or ip address of TS3 server (default: {DEFAULT_TS3_HOST})',

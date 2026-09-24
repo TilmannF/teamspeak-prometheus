@@ -9,13 +9,13 @@ repository can be developed and verified with no TeamSpeak server anywhere.
 
 from __future__ import annotations
 
-import argparse
 import math
 import socketserver
 import threading
 import time
 from collections import deque
 
+from app import METRICS_NAMES, SafeArgumentParser
 from tests.serverquery import (
     BANNER,
     LINE_TERMINATOR,
@@ -49,8 +49,6 @@ VIRTUALSERVERS = virtualservers(2)
 # Every metric this exporter reads, plus the name it labels them with. Values
 # are arbitrary but distinct per virtualserver so tests can tell them apart.
 def serverinfo(server: dict[str, object]) -> dict[str, object]:
-    from app import METRICS_NAMES
-
     virtualserver_id = int(server['virtualserver_id'])  # type: ignore[arg-type]
     info = dict(server)
     for offset, metric in enumerate(METRICS_NAMES):
@@ -259,8 +257,9 @@ class FakeTs3Server:
         self.stop()
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None) -> int:
+    # Masks values in its errors: --password takes a password, see AGENTS.md.
+    parser = SafeArgumentParser(description=__doc__)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument(
         '--password',
@@ -270,7 +269,7 @@ def main() -> int:
     parser.add_argument('--port', type=int, default=0, help='0 picks a free port')
     parser.add_argument('--virtualservers', type=int, default=2)
     parser.add_argument('--flood-limit', type=int, default=None)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     server = FakeTs3Server(
         password=args.password,

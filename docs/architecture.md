@@ -209,8 +209,10 @@ first with `TEAMSPEAK_PASSWORD`, then with every password given — flag and
 environment variable, used or overridden. A configuration error that quotes an
 invalid value equal to the password therefore prints `*censored*`.
 
-argparse prints its own errors to stderr, outside logging. `_ArgumentParser`
-masks every value-like fragment of the command line (anything not starting with
-`-`, and anything after `=`) with `…`, so a typo such as
-`--ts3pasword <password>` reports `unrecognized arguments: --ts3pasword …`.
-Only whole fragments are masked; a password `3` leaves `--ts3port` intact.
+argparse prints its own errors to stderr, outside logging.
+`SafeArgumentParser` masks every value-like fragment of the command line
+(anything not starting with `-`, and anything after `=`) with `…`, so a typo
+such as `--ts3pasword <password>` reports
+`unrecognized arguments: --ts3pasword …`. Only whole fragments are masked; a
+password `3` leaves `--ts3port` intact. The test harness and the fake server use
+it too, and a test scans the repository for any parser that does not.

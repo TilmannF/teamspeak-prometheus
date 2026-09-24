@@ -9,7 +9,6 @@ ignored, so a stray ``TEAMSPEAK_HOST`` cannot point a test at a real server.
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 
 from prometheus_client import CollectorRegistry, start_http_server
@@ -65,7 +64,7 @@ def run(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = app.SafeArgumentParser(description=__doc__)
     parser.add_argument('--ts3host', default='127.0.0.1')
     parser.add_argument('--ts3port', type=int, default=0, help='0 starts a fake server')
     parser.add_argument('--ts3password', default='fake-password')

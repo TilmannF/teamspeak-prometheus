@@ -4,7 +4,9 @@ repeat a value, and redaction is active before the first log line.
 
 from __future__ import annotations
 
+import ast
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -162,3 +164,77 @@ def test_a_configuration_error_never_prints_the_password(argv, env, clean_env, c
     assert 'Invalid configuration' in err
     assert '70000' not in err
     assert '*censored*' in err
+
+
+# -- every command line in the repository masks values ------------------------
+
+REPOSITORY = Path(__file__).parent.parent
+
+
+def python_files() -> list[Path]:
+    return [
+        path
+        for path in REPOSITORY.rglob('*.py')
+        if not any(
+            part.startswith('.') or part == '__pycache__'
+            for part in path.relative_to(REPOSITORY).parts
+        )
+    ]
+
+
+def plain_parsers(path: Path) -> list[int]:
+    """Lines constructing an ``ArgumentParser`` directly."""
+
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(path.read_text(), str(path)))
+        if isinstance(node, ast.Call)
+        and (
+            (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'ArgumentParser'
+            )
+            or (isinstance(node.func, ast.Name) and node.func.id == 'ArgumentParser')
+        )
+    ]
+
+
+def test_the_scan_sees_the_whole_repository():
+    names = {path.relative_to(REPOSITORY).as_posix() for path in python_files()}
+
+    assert {'app.py', 'healthcheck.py', 'tests/exporter_harness.py'} <= names
+    assert not any(name.startswith('.venv/') for name in names)
+
+
+def test_no_command_line_parser_bypasses_value_masking():
+    offenders = {
+        path.relative_to(REPOSITORY).as_posix(): lines
+        for path in python_files()
+        if (lines := plain_parsers(path))
+    }
+
+    assert offenders == {}, 'use app.SafeArgumentParser, see AGENTS.md "Secrets"'
+
+
+@pytest.mark.parametrize(
+    'argv',
+    [
+        ['--ts3pasword', SECRET],
+        ['--ts3pasword=' + SECRET],
+        [SECRET],
+    ],
+    ids=['typo', 'typo-equals', 'positional'],
+)
+@pytest.mark.parametrize('tool', ['harness', 'fake-server'])
+def test_the_test_tools_never_print_a_value_either(tool, argv, capsys):
+    from tests import exporter_harness, fake_ts3_server
+
+    main = {'harness': exporter_harness.main, 'fake-server': fake_ts3_server.main}[tool]
+
+    with pytest.raises(SystemExit) as caught:
+        main(argv)
+
+    err = capsys.readouterr().err
+    assert caught.value.code == 2
+    assert 'unrecognized arguments' in err
+    assert SECRET not in err
