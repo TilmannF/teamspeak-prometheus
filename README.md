@@ -9,10 +9,14 @@ A small, read-only Prometheus exporter for TeamSpeak 3.
 
 ## What it does
 
-It polls a TeamSpeak 3 server over the ServerQuery protocol at a fixed
+It polls a TeamSpeak 3 server over the ServerQuery protocol at a configurable
 interval and exposes the returned per-virtualserver counters as Prometheus
 gauges on an HTTP `/metrics` endpoint. TeamSpeak's numbers are passed through
 unconverted.
+
+It keeps running when TeamSpeak does not: connection errors, rejected logins,
+flood throttling and missing fields are logged, retried with backoff, and
+reported through its own `teamspeak_exporter_*` metrics.
 
 ## What it deliberately does not do
 
@@ -56,7 +60,8 @@ Pin a version tag in anything beyond local experimentation — see
 
 ### Environment variables (recommended)
 
-Environment variables take precedence over the command-line arguments below.
+Environment variables take precedence over the command-line arguments below;
+the exporter logs a warning for every flag an environment variable overrides.
 
 | Name | Description | Default value |
 | --- | --- | --- |
@@ -65,6 +70,8 @@ Environment variables take precedence over the command-line arguments below.
 | `TEAMSPEAK_USERNAME` | ServerQuery username of TS3 server | *serveradmin* |
 | `TEAMSPEAK_PASSWORD` | ServerQuery password of TS3 server |  |
 | `METRICS_PORT` | Port on which this service exposes the metrics | *8000* |
+| `TEAMSPEAK_POLL_INTERVAL` | Seconds between two polls of the TS3 server | *5* |
+| `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
 ### Command-line arguments
 
@@ -77,11 +84,23 @@ List all arguments with `python app.py -h`.
 | `--ts3username` | ServerQuery username of TS3 server | *serveradmin* |
 | `--ts3password` | ServerQuery password of TS3 server |  |
 | `--metricsport` | Port on which this service exposes the metrics | *8000* |
+| `--pollinterval` | Seconds between two polls of the TS3 server | *5* |
+| `--loglevel` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
 **Prefer `TEAMSPEAK_PASSWORD` over `--ts3password`.** A command-line argument
 is visible to anything that can read the process list (`ps`, `/proc/<pid>/cmdline`);
 the environment variable is not on the command line, though it is still
 readable by the same user, root, or `docker inspect` on the container.
+
+### ServerQuery allowlist
+
+TeamSpeak throttles query clients that are not on its allowlist — by default
+10 commands per 3 seconds. One poll needs `3 + 2 × virtualservers` commands.
+The exporter waits and retries when throttled, but on a host with several
+virtualservers, add the exporter's IP to `query_ip_allowlist.txt` on the
+TeamSpeak server. If TeamSpeak has already banned the IP, the exporter logs
+`closed the connection before greeting` until the ban expires (default 10
+minutes).
 
 ## Deployment
 
@@ -114,11 +133,16 @@ services:
 
 ## Metrics
 
-Every metric is prefixed with `teamspeak_` and labelled with
-`virtualserver_name`. See [docs/metrics.md](docs/metrics.md) for the full
-list — **these names are a stable contract**; existing dashboards and
+Every TeamSpeak metric is prefixed with `teamspeak_` and labelled with
+`virtualserver_name`; the exporter's own health is under
+`teamspeak_exporter_` (last poll time, success, errors, missing fields). See
+[docs/metrics.md](docs/metrics.md) for the full list — **these names are a stable contract**; existing dashboards and
 alerting rules are keyed on them, and a rename or removal is a breaking
 change (see [CHANGELOG.md](CHANGELOG.md)).
+
+The container image runs as a non-root user and has a `HEALTHCHECK` on the
+metrics endpoint. It stays healthy while TeamSpeak is unreachable — that is
+what `teamspeak_exporter_poll_success` is for.
 
 A Grafana dashboard demonstrating a subset of the metrics is committed at
 `grafana-dashboard.json`.

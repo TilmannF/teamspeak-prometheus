@@ -10,7 +10,7 @@ your own reading are how to judge the code.
 ## The rules the models follow
 
 `AGENTS.md` and `policies/` are normative and public on purpose. They define the
-things a model cannot infer from 140 lines of Python:
+things a model cannot infer from a few hundred lines of Python:
 
 * which metric names are a contract with existing users,
 * that this exporter reads and never administers,

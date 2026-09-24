@@ -65,7 +65,7 @@ Invalid configuration MUST fail early with a clear error.
 
 The TeamSpeak client MUST be injected into the metric service via constructor parameter, defaulting to the real client.
 
-Tests MUST be able to run without importing `ts3` and without opening a socket.
+Unit tests MUST be able to run without opening a socket. The ServerQuery client takes its connection as a constructor parameter for that reason.
 
 Core logic MUST NOT reach for module-level globals, clocks, or the network.
 
@@ -83,11 +83,9 @@ Errors MUST NOT discard the root cause; use `raise ... from err` when re-raising
 
 ## 8. Logging and Output
 
-Production code SHOULD use `logging`, not `print`.
+Production code MUST use `logging`, not `print`. Pass values as logging arguments (`log.info('x %s', y)`), not pre-formatted strings.
 
-The current code uses `print`. Converting it is a tracked backlog item (`docs/modernization-backlog.md`), not a drive-by change.
-
-Neither `print` nor `logging` may ever emit the ServerQuery password. The existing censoring in the settings banner MUST be preserved.
+Neither `print` nor `logging` may ever emit the ServerQuery password. Error messages MUST name a failed command, never its parameters: `login` carries the password. The existing censoring in the settings banner MUST be preserved.
 
 ## 9. Tests
 

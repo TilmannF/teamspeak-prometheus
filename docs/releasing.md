@@ -19,7 +19,9 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
 ## Cutting a release
 
 1. Update `CHANGELOG.md`: move the pending changes into a new `## [X.Y.Z]`
-   section, dated, with a link reference at the bottom of the file.
+   section, dated, with a link reference at the bottom of the file. Set
+   `__version__` in `app.py` to `X.Y.Z` — it is what
+   `teamspeak_exporter_build_info` reports.
 2. Commit that on a branch, get it reviewed and merged to `master` like any
    other change.
 3. From `master`, tag and push:

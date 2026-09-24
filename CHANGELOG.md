@@ -17,6 +17,16 @@ It is the state as shipped: what a user gets if they pull this tag today.
 
 ### Added
 
+- `--pollinterval` / `TEAMSPEAK_POLL_INTERVAL` (default 5 seconds, unchanged)
+  and `--loglevel` / `LOG_LEVEL`.
+- Exporter self-metrics: `teamspeak_exporter_last_poll_timestamp_seconds`,
+  `teamspeak_exporter_last_successful_poll_timestamp_seconds`,
+  `teamspeak_exporter_poll_success`, `teamspeak_exporter_poll_duration_seconds`,
+  `teamspeak_exporter_poll_errors_total{reason}`,
+  `teamspeak_exporter_missing_fields{virtualserver_name}`,
+  `teamspeak_exporter_build_info{version}`.
+- A warning at startup for every flag an environment variable overrides.
+- Container `HEALTHCHECK`.
 - Multi-architecture (`linux/amd64`, `linux/arm64`) container images, published
   to GHCR and Docker Hub on tagged release, with build provenance attestation
   and an SBOM.
@@ -26,13 +36,32 @@ It is the state as shipped: what a user gets if they pull this tag today.
   Scorecard.
 - Dependabot for GitHub Actions, Python, and the base image.
 - A test suite, `ruff` linting, and a fake ServerQuery server for end-to-end
-  testing without a real TeamSpeak server.
+  testing without a real TeamSpeak server, checked against responses captured
+  from TeamSpeak 3.13.8.
 
-### Known limitations
+### Changed
 
-Tracked in `docs/modernization-backlog.md`: the archived TeamSpeak client
-library (blocks Python 3.13+), `print`-based logging, no connection retry, a
-hardcoded 5-second poll interval, and container hardening gaps (runs as root,
-no `HEALTHCHECK`). None of these affect the metric contract.
+- The archived `python-ts3` library is replaced by a small built-in
+  ServerQuery client (standard library only). The only runtime dependency left
+  is `prometheus_client`.
+- The image runs Python 3.14 (was 3.12), as a non-root user, without `git`.
+- Output goes through `logging` with timestamps and levels.
+- The exporter no longer exits on connection errors, rejected logins, or
+  ServerQuery errors: it logs, counts the error, and retries with backoff
+  (doubling, capped at 60 seconds or the poll interval if that is longer).
+- The poll interval is measured start to start.
+
+### Fixed
+
+- On hosts with four or more virtualservers, TeamSpeak's flood protection
+  throttled every poll and the exporter silently skipped the remaining
+  virtualservers. It now waits and retries as TeamSpeak asks.
+- One failing virtualserver (for example a stopped one) no longer aborts the
+  poll for the others.
+- A missing or non-numeric `serverinfo` field no longer crashes the exporter;
+  only that series is left out.
+- Series of removed virtualservers are dropped instead of keeping their last
+  value until restart.
+- ServerQuery reads have a 10-second timeout instead of none.
 
 [1.0.0]: https://github.com/TilmannF/teamspeak-prometheus/releases/tag/v1.0.0

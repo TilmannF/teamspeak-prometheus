@@ -1,7 +1,9 @@
 # Metrics
 
-Every metric this exporter publishes is a Prometheus **gauge**, prefixed with
-`teamspeak_` and carrying exactly one label, `virtualserver_name`.
+Every TeamSpeak metric this exporter publishes is a Prometheus **gauge**,
+prefixed with `teamspeak_` and carrying exactly one label, `virtualserver_name`.
+The exporter's own health is reported separately under `teamspeak_exporter_`
+(see below).
 
 The values are TeamSpeak's own numbers, passed through unconverted. A metric
 means whatever the identically named field of TeamSpeak's `serverinfo` response
@@ -76,8 +78,35 @@ teamspeak_virtualserver_clientsonline{virtualserver_name="Zweiter Server"} 3.0
 ```
 
 Virtualservers are discovered on every poll via `serverlist`, so a newly created
-one appears without a restart. A removed one keeps its last value until the
-process restarts — see `docs/modernization-backlog.md`.
+one appears without a restart. A removed one — or one that could not be read,
+for example because it is stopped — disappears from the next poll's output.
+
+If a `serverinfo` field is missing or not a number, only that series is left
+out; the rest of the virtualserver is still exported and
+`teamspeak_exporter_missing_fields` counts the gap.
+
+## Exporter metrics
+
+The exporter's own health. Part of the same stability contract.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `teamspeak_exporter_last_poll_timestamp_seconds` | gauge | | Unix time the last poll started |
+| `teamspeak_exporter_last_successful_poll_timestamp_seconds` | gauge | | Unix time the last fully successful poll started; 0 until one succeeds |
+| `teamspeak_exporter_poll_success` | gauge | | 1 if the last poll read every virtualserver without error, else 0 |
+| `teamspeak_exporter_poll_duration_seconds` | gauge | | Duration of the last poll |
+| `teamspeak_exporter_poll_errors_total` | counter | `reason` | Failed polls or poll steps: `connection`, `login`, `query`, `unexpected` |
+| `teamspeak_exporter_missing_fields` | gauge | `virtualserver_name` | Contract fields missing or not numeric in the last `serverinfo` |
+| `teamspeak_exporter_build_info` | gauge (info) | `version` | Always 1 |
+
+Useful alerts:
+
+```yaml
+- alert: TeamSpeakExporterStale
+  expr: time() - teamspeak_exporter_last_successful_poll_timestamp_seconds > 120
+- alert: TeamSpeakMissingMetrics
+  expr: teamspeak_exporter_missing_fields > 0
+```
 
 ## What is not exported
 

@@ -19,7 +19,7 @@ Docker image: `tilmannf/teamspeak-prometheus`
 
 ## Project Goal
 
-`teamspeak-prometheus` is a small read-only exporter. It polls a TeamSpeak 3 server over the ServerQuery protocol at a fixed interval and exposes the returned per-virtualserver counters as Prometheus gauges on an HTTP endpoint.
+`teamspeak-prometheus` is a small read-only exporter. It polls a TeamSpeak 3 server over the ServerQuery protocol at a configurable interval and exposes the returned per-virtualserver counters as Prometheus gauges on an HTTP endpoint.
 
 It is deliberately thin. TeamSpeak's numbers are passed through unconverted.
 
@@ -40,7 +40,7 @@ The exporter reads. It does not administer.
 
 This is the most important rule in this repository.
 
-The metric names in `METRICS_NAMES`, the `teamspeak_` prefix, and the `virtualserver_name` label are **public API**. Users' Grafana dashboards and Prometheus alerting rules are keyed on them.
+The metric names in `METRICS_NAMES`, the `teamspeak_` prefix, and the `virtualserver_name` label are **public API**. So are the exporter's own `teamspeak_exporter_*` metrics and their labels. Users' Grafana dashboards and Prometheus alerting rules are keyed on them.
 
 Agents MUST NOT rename, remove, reorder-into-renaming, re-prefix, or re-label a metric as a side effect of another task.
 
@@ -68,20 +68,21 @@ Never commit a real host, password, or ServerQuery credential. Test fixtures use
 
 ```text
 main()
-  → parse_args()            argparse
-  → resolve_config()        pure: args + environment mapping → Config
-  → build_gauges(registry)  41 gauges, explicit CollectorRegistry
-  → start_http_server()     prometheus_client
-  → loop every 5s:
-        Teamspeak3MetricService.connect()      ServerQuery login
-        Teamspeak3MetricService.read()         serverlist → use → serverinfo
-        update_gauges()                        pure: serverinfo dict → gauges
-        Teamspeak3MetricService.disconnect()
+  → parse_args()                    argparse
+  → resolve_config()                pure: args + environment mapping → Config
+  → build_gauges(registry)          41 gauges, explicit CollectorRegistry
+  → build_exporter_metrics()        teamspeak_exporter_* self-metrics
+  → start_http_server()             prometheus_client
+  → poll_forever(), every --pollinterval (default 5s), backoff on failure:
+        Teamspeak3MetricService.poll()   never raises
+          ServerQueryClient              stdlib socket, login → serverlist
+                                         → use → serverinfo per virtualserver
+          update_gauges()                pure: serverinfo dict → gauges
 ```
 
 See `docs/architecture.md`.
 
-Everything above the `Teamspeak3MetricService` boundary is pure and directly testable. The TeamSpeak client is injected, so tests need neither the `ts3` package nor a socket.
+Everything above the `Teamspeak3MetricService` boundary is pure and directly testable. The TeamSpeak client is injected, and the ServerQuery client takes its connection as a parameter, so unit tests need no socket.
 
 ## How To Work
 
@@ -107,7 +108,7 @@ Do not rewrite unrelated files. Do not introduce dependencies without explaining
 
 ## Scope Discipline
 
-`docs/modernization-backlog.md` lists known weaknesses that are deliberately **not** being fixed yet: the archived TeamSpeak library, `print` instead of `logging`, no retry or connection reuse, the hardcoded poll interval, and more.
+`docs/modernization-backlog.md` lists known weaknesses that are deliberately **not** being fixed yet.
 
 Agents MUST NOT opportunistically pull a backlog item into an unrelated change. Each gets its own branch and its own pull request.
 
@@ -147,11 +148,13 @@ Stop and ask before:
 ## Current Default Decisions
 
 ```text
-Language:            Python 3.12+
+Language:            Python 3.12+ (image runs 3.14)
+Runtime deps:        prometheus_client only; ServerQuery client is in app.py
 Linter/formatter:    ruff
 Tests:               pytest
 Entry point:         app.py (single module, intentionally)
-Poll interval:       5s, hardcoded
+Poll interval:       5s, --pollinterval / TEAMSPEAK_POLL_INTERVAL
+Container:           python:3.14-alpine, non-root
 Metrics port:        8000
 ServerQuery port:    10011
 License:             MIT
@@ -160,4 +163,4 @@ CI:                  GitHub Actions (lint, test, docker build)
 
 ## Status
 
-The repository has just been AI-enabled: policies, tests, tooling, and CI exist; the application itself is still the original 2020-era implementation apart from a testability refactor. Modernization is queued in `docs/modernization-backlog.md`.
+The 2026 modernization is done: an in-repo ServerQuery client replaced the archived library, the image runs Python 3.14 as non-root, output goes through `logging`, the poll interval is configurable, and polls survive connection, login, flood and missing-field errors while reporting them through `teamspeak_exporter_*` metrics. What is left is in `docs/modernization-backlog.md`.

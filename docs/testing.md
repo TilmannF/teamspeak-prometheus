@@ -11,29 +11,29 @@ make run-fake     # run the exporter locally and scrape it by hand
 
 `make run-fake` starts a fake TeamSpeak ServerQuery interface and the real
 exporter against it, then prints the `curl` command to scrape. It listens on
-the usual port 8000; pass extra flags through `RUN_FAKE_ARGS` if that port is
-taken or you want it to stop by itself:
+the usual port 8000; pass extra flags through `RUN_FAKE_ARGS`:
 
 ```bash
 make run-fake RUN_FAKE_ARGS="--metricsport 8231"
 make run-fake RUN_FAKE_ARGS="--iterations 2 --interval 0.2"   # what CI runs
+make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 ```
 
 ## Layout
 
 | File | Purpose |
 | --- | --- |
-| `tests/serverquery.py` | Wire helpers: escaping, `\n\r` framing, record encoding |
-| `tests/fake_ts3_server.py` | Threaded TCP ServerQuery stub with canned virtualservers |
-| `tests/query_client.py` | Socket client used by the harness (see below) |
+| `tests/fixtures/ts3-3.13.8-*.bin` | Raw bytes captured from a real TeamSpeak 3.13.8 server |
+| `tests/serverquery.py` | Independent reference encoder: escaping, framing, records |
+| `tests/fake_ts3_server.py` | Threaded TCP ServerQuery stub: N virtualservers, flood protection |
 | `tests/exporter_harness.py` | Runs the real exporter against the fake server |
-| `tests/fakes.py` | In-process fake client for unit tests — no sockets |
-| `tests/test_serverquery.py` | Escaping and framing round-trips |
-| `tests/test_config.py` | Defaults, environment precedence, port parsing |
-| `tests/test_metrics.py` | The metric contract: names, prefix, label, values |
-| `tests/test_service.py` | Login, the poll sequence, error paths |
-| `tests/test_smoke.py` | Subprocess boot → scrape `/metrics` |
-| `tests/test_ts3_wire.py` | The real `ts3` package against the fake server |
+| `tests/fakes.py` | In-process fake client and scripted connection — no sockets |
+| `tests/test_serverquery.py` | Reference encoder round-trips |
+| `tests/test_client.py` | `ServerQueryClient` against scripted bytes and the real captures |
+| `tests/test_config.py` | Defaults, environment precedence, validation, override warnings |
+| `tests/test_metrics.py` | The metric contract: names, prefix, label, values, self-metrics |
+| `tests/test_service.py` | Poll sequence, error survival, series lifecycle, backoff |
+| `tests/test_smoke.py` | Subprocess boot → scrape `/metrics`, flood and outage survival |
 
 ## Markers
 
@@ -44,23 +44,28 @@ Anything that does is marked `smoke` and excluded from `make test`:
 pytestmark = pytest.mark.smoke
 ```
 
-## Why there are two clients
+## Keeping the fake honest
 
-The production exporter uses the archived `ts3` package. That package imports
-`telnetlib`, which was **removed in Python 3.13**, so it cannot even be
-installed on a modern interpreter.
+The production client is tested against three independent things:
 
-To keep the suite runnable everywhere:
+* **Real captures.** `tests/fixtures/` holds the banner, a `serverlist` and a
+  `serverinfo` response recorded byte-for-byte from TeamSpeak 3.13.8 (the
+  unique identifier replaced by a fake one). `tests/test_client.py` parses them.
+* **A reference encoder.** `tests/serverquery.py` is a separate implementation
+  of the escaping rules; the fake server uses it and the client tests compare
+  against it.
+* **The fake server.** Two-line banner, `\n\r` framing, error trailers and
+  TeamSpeak-style flood protection, over real TCP.
 
-* `tests/query_client.py` speaks the same ServerQuery protocol and is what the
-  smoke harness injects. It runs on any Python version.
-* `tests/test_ts3_wire.py` drives the fake server with the *real* `ts3` package
-  and is skipped when that package is missing. It exists so the fake cannot
-  quietly drift away from the protocol the production code actually speaks.
+To refresh the captures, run the official image and record the raw responses:
 
-CI runs unit tests on 3.12/3.13/3.14 and the smoke tests on 3.12, where `ts3`
-installs. Replacing the library is the first item in
-[modernization-backlog.md](modernization-backlog.md).
+```bash
+docker run -d --name ts3 -p 127.0.0.1:10011:10011 \
+  -e TS3SERVER_LICENSE=accept \
+  -e TS3SERVER_SERVERADMIN_PASSWORD=<pick one> teamspeak:latest
+```
+
+Replace `virtualserver_unique_identifier` before committing.
 
 ## Adding a metric
 
@@ -76,7 +81,7 @@ installs. Replacing the library is the first item in
 ```python
 from tests.fake_ts3_server import FakeTs3Server
 
-with FakeTs3Server(password='fake-password') as server:
+with FakeTs3Server(password='fake-password', virtualserver_count=3) as server:
     ...  # server.host, server.port
 ```
 
