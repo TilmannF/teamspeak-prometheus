@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import signal
+
 import pytest
 from prometheus_client import CollectorRegistry
 
@@ -300,6 +302,42 @@ def test_series_survive_a_failed_poll():
         setup.value('teamspeak_virtualserver_uptime', virtualserver_name='First')
         is not None
     )
+
+
+def test_a_shutdown_is_not_swallowed_by_the_poll():
+    def terminated(host: str, port: int):
+        raise app.Shutdown
+
+    setup = Setup(factory=terminated)
+
+    with pytest.raises(app.Shutdown):
+        setup.service.poll()
+
+
+def test_a_shutdown_mid_session_still_closes_the_connection():
+    setup = Setup()
+
+    def interrupted() -> list[dict[str, object]]:
+        raise app.Shutdown
+
+    setup.client.serverlist = interrupted
+
+    with pytest.raises(app.Shutdown):
+        setup.service.poll()
+
+    assert setup.client.closed
+
+
+def test_sigterm_raises_shutdown():
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        app.handle_termination()
+        handler = signal.getsignal(signal.SIGTERM)
+
+        with pytest.raises(app.Shutdown):
+            handler(signal.SIGTERM, None)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def test_the_password_never_reaches_the_log(caplog):

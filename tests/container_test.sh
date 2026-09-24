@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# End-to-end test of the image's HEALTHCHECK: every supported way of choosing
-# the metrics port, and a proxy in the environment, must end healthy; a
-# container without a running exporter must end unhealthy.
+# End-to-end test of the built image.
 #
-#   tests/container_healthcheck.sh [image]      (default: teamspeak-prometheus:dev)
+# HEALTHCHECK: every supported way of choosing the metrics port, and a proxy in
+# the environment, must end healthy; a container without a running exporter
+# must end unhealthy.
+#
+# Shutdown: `docker stop` must end the exporter cleanly -- exit code 0 within a
+# few seconds, not a SIGKILL after Docker's 10-second grace period.
+#
+#   tests/container_test.sh [image]      (default: teamspeak-prometheus:dev)
 #
 # Needs Docker. No TeamSpeak server: the exporter points at an address where
 # nothing listens, which must not affect its health.
@@ -11,7 +16,7 @@
 set -euo pipefail
 
 IMAGE="${1:-teamspeak-prometheus:dev}"
-PREFIX="tp-healthcheck-$$"
+PREFIX="tp-container-test-$$"
 # A fixture value, only ever compared against, never printed.
 SECRET="fixture-password-$$"
 CONTAINERS=()
@@ -84,5 +89,24 @@ expect shell-wrapper healthy
 expect env-beats-flag healthy
 expect behind-proxy healthy
 expect no-exporter unhealthy
+
+# stopped NAME: docker stop must finish fast with exit code 0 and a clean log.
+stopped() {
+  local name="$PREFIX-$1" started elapsed code
+  started="$(date +%s)"
+  docker stop "$name" >/dev/null
+  elapsed=$(($(date +%s) - started))
+  code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
+  if [[ "$code" == 0 && "$elapsed" -le 5 ]] && docker logs "$name" 2>&1 | grep -q 'Stopped'; then
+    echo "ok   $1: stopped in ${elapsed}s, exit code $code"
+  else
+    echo "FAIL $1: stopped in ${elapsed}s, exit code $code (want <= 5s, 0, 'Stopped' logged)"
+    FAILED=1
+  fi
+}
+
+stopped default
+stopped behind-init
+stopped shell-wrapper
 
 exit "$FAILED"

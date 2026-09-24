@@ -122,7 +122,8 @@ services:
 
 ### Container health
 
-The image runs as a non-root user (UID 10001) and has a Docker `HEALTHCHECK`.
+The image runs as a non-root user (UID 10001), stops cleanly on `docker stop`
+(SIGTERM), and has a Docker `HEALTHCHECK`.
 Healthy means the metrics endpoint answers — on whichever port the exporter
 actually uses, whether set with `METRICS_PORT` or with `--metricsport` in an
 overridden container command, also behind `--init` or a shell wrapper. It
@@ -178,7 +179,7 @@ ships a fake ServerQuery server.
 make setup     # virtualenv + runtime and dev dependencies
 make check     # lint, format check, unit tests
 make run-fake  # run the exporter against the fake TS3 server
-make docker-healthcheck  # build the image and test its healthcheck (needs Docker)
+make docker-test  # build the image, test healthcheck and shutdown (needs Docker)
 ```
 
 See [docs/testing.md](docs/testing.md) for details, [docs/architecture.md](docs/architecture.md)

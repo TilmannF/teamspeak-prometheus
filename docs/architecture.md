@@ -165,6 +165,18 @@ probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout,
   restarts unhealthy containers must not restart the exporter because
   TeamSpeak is down; `teamspeak_exporter_poll_success` reports that.
 
+## Shutdown
+
+`main()` installs a SIGTERM handler that raises `Shutdown`, a `BaseException`
+like `KeyboardInterrupt`, so `poll()`'s `except Exception` cannot swallow it.
+It interrupts the exporter wherever it is — sleeping between polls or blocked
+in a socket read — the `finally` blocks close the ServerQuery session, and the
+process logs `Stopped` and exits 0.
+
+This matters in the container, where the exporter is PID 1: the kernel ignores
+signals PID 1 has no handler for, so without it `docker stop` would wait 10
+seconds and SIGKILL the process (exit code 137).
+
 ## Configuration precedence
 
 Environment variables win over command-line arguments. That is long-standing

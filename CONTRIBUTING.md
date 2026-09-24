@@ -25,7 +25,7 @@ No TeamSpeak server is needed for any of this:
 make setup
 make check        # ruff check, ruff format --check, unit tests
 make test-smoke   # end-to-end against the fake ServerQuery server
-make docker-healthcheck  # only if you touch the Dockerfile or healthcheck.py
+make docker-test  # only if you touch the Dockerfile, healthcheck.py or startup/shutdown
 ```
 
 See [docs/testing.md](docs/testing.md).

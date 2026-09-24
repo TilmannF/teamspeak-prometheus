@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -358,7 +359,10 @@ def trickling_server():
     stop_event = threading.Event()
 
     def serve() -> None:
-        connection, _ = listener.accept()
+        try:
+            connection, _ = listener.accept()
+        except OSError:  # closed before anyone connected
+            return
         with connection:
             connection.sendall(b'TS3\n\rWelcome\n\r')
             while not stop_event.is_set():
@@ -386,3 +390,53 @@ def test_a_trickling_server_cannot_stall_a_session(trickling_server):
 
     assert time.monotonic() - started < 4
     client.close()
+
+
+def wait_for_metrics(port: int, timeout: float = 20) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            HTTP.get(f'http://127.0.0.1:{port}/metrics', timeout=2)
+            return
+        except requests.RequestException:
+            time.sleep(0.1)
+    raise AssertionError('metrics endpoint never came up')
+
+
+def terminate_and_time(process: subprocess.Popen[str]) -> tuple[float, str]:
+    started = time.monotonic()
+    process.send_signal(signal.SIGTERM)
+    output = process.communicate(timeout=10)[0]
+    return time.monotonic() - started, output
+
+
+@pytest.mark.parametrize('target', ['idle', 'stuck-in-a-read'])
+def test_sigterm_stops_the_exporter_cleanly(target, trickling_server):
+    # idle: between polls, TeamSpeak unreachable. stuck-in-a-read: mid-session,
+    # blocked on a server that never finishes its line.
+    port = free_port()
+    ts3_port = str(free_port() if target == 'idle' else trickling_server)
+    process = subprocess.Popen(
+        [sys.executable, '-u', 'app.py'],
+        env=app_env(
+            METRICS_PORT=str(port),
+            TEAMSPEAK_HOST='127.0.0.1',
+            TEAMSPEAK_PORT=ts3_port,
+            TEAMSPEAK_POLL_INTERVAL='60',
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        wait_for_metrics(port)
+        time.sleep(0.5)  # let the first poll start
+        elapsed, output = terminate_and_time(process)
+    finally:
+        if process.poll() is None:
+            process.kill()
+
+    assert process.returncode == 0
+    assert elapsed < 3
+    assert 'Stopped' in output
+    assert 'Traceback' not in output

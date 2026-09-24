@@ -11,6 +11,7 @@ import enum
 import logging
 import os
 import re
+import signal
 import socket
 import sys
 import time
@@ -985,6 +986,28 @@ def configure_logging(level: str, secrets: list[str] | None = None) -> None:
     log.addFilter(RedactingFilter(secrets or []))
 
 
+class Shutdown(BaseException):
+    """SIGTERM arrived. A ``BaseException``, like ``KeyboardInterrupt``, so the
+    ``except Exception`` in ``poll()`` cannot swallow it."""
+
+
+def _shut_down(signum: int, frame: object) -> None:
+    raise Shutdown
+
+
+def handle_termination() -> None:
+    """Stop cleanly on SIGTERM.
+
+    In a container the exporter is PID 1, and the kernel ignores a signal PID 1
+    has no handler for: without this, ``docker stop`` waits its 10 seconds and
+    then kills the process (exit code 137). The exception interrupts a poll
+    wherever it is, even a blocked socket read, and the ``finally`` blocks
+    still close the ServerQuery session.
+    """
+
+    signal.signal(signal.SIGTERM, _shut_down)
+
+
 def main(argv: list[str] | None = None) -> int:
     # Redaction first: configuration errors quote the offending value, which
     # can equal the password. Every password given counts, used or not.
@@ -1004,6 +1027,17 @@ def main(argv: list[str] | None = None) -> int:
         log.warning('Ignoring %s: environment variables take precedence', flag)
     log.info(describe_settings(config))
 
+    handle_termination()
+    try:
+        return serve(config)
+    except (KeyboardInterrupt, Shutdown):
+        log.info('Stopped')
+        return 0
+
+
+def serve(config: Config) -> int:
+    """Expose the metrics and poll until interrupted."""
+
     gauges = build_gauges(REGISTRY)
     exporter_metrics = build_exporter_metrics(REGISTRY)
     try:
@@ -1013,11 +1047,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     log.info('Started metrics endpoint on port %s', config.metrics_port)
 
-    service = Teamspeak3MetricService(config, gauges, exporter_metrics)
-    try:
-        poll_forever(service, config.poll_interval)
-    except KeyboardInterrupt:
-        log.info('Stopped')
+    poll_forever(
+        Teamspeak3MetricService(config, gauges, exporter_metrics), config.poll_interval
+    )
     return 0
 
 

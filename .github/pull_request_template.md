@@ -11,7 +11,7 @@
 
 - [ ] `make check` passes
 - [ ] `make test-smoke` passes, or is not relevant
-- [ ] `make docker-healthcheck` passes, or the Dockerfile and `healthcheck.py` are untouched
+- [ ] `make docker-test` passes, or the Dockerfile, `healthcheck.py` and startup/shutdown are untouched
 - [ ] Tests added or updated for behavior changes
 - [ ] `CHANGELOG.md` updated, or not needed (internal-only change)
 

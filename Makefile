@@ -6,7 +6,7 @@ VENV := .venv
 RUN_FAKE_ARGS ?=
 BIN := $(VENV)/bin
 
-.PHONY: help setup lint format check test test-smoke run-fake docker-build docker-healthcheck clean
+.PHONY: help setup lint format check test test-smoke run-fake docker-build docker-test clean
 
 help:
 	@echo "setup         create $(VENV) and install runtime + dev dependencies"
@@ -17,7 +17,7 @@ help:
 	@echo "test-smoke    end-to-end test against the fake ServerQuery server"
 	@echo "run-fake      run the exporter against the fake ServerQuery server"
 	@echo "docker-build  build the container image"
-	@echo "docker-healthcheck  build the image and test its HEALTHCHECK end to end"
+	@echo "docker-test   build the image, test its HEALTHCHECK and shutdown"
 
 $(BIN)/python:
 	$(PYTHON) -m venv $(VENV)
@@ -47,8 +47,8 @@ run-fake: $(BIN)/python
 docker-build:
 	docker build -t teamspeak-prometheus:dev .
 
-docker-healthcheck: docker-build
-	tests/container_healthcheck.sh teamspeak-prometheus:dev
+docker-test: docker-build
+	tests/container_test.sh teamspeak-prometheus:dev
 
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache

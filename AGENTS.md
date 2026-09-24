@@ -96,7 +96,7 @@ make check        # ruff check, ruff format --check, unit tests
 make test-smoke   # end-to-end against the fake ServerQuery server
 make run-fake     # run the exporter locally, no TeamSpeak server needed
 make docker-build # verify the image still builds
-make docker-healthcheck # build the image and test its HEALTHCHECK end to end
+make docker-test   # build the image, test its HEALTHCHECK and clean shutdown
 ```
 
 No real TeamSpeak server is required to develop or verify anything in this repository. `tests/fake_ts3_server.py` is a real TCP ServerQuery stub.

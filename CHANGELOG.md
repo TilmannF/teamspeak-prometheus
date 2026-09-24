@@ -77,6 +77,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
   session a 60-second deadline, so a server that trickles data or never ends
   a line cannot stall the exporter.
 - Stopped virtualservers are skipped instead of failing every poll.
+- The exporter stops cleanly on SIGTERM. As PID 1 in the container it used to
+  ignore it, so `docker stop` waited 10 seconds and killed it.
 - A malformed ServerQuery error line is an error, not success.
 
 [1.0.0]: https://github.com/TilmannF/teamspeak-prometheus/releases/tag/v1.0.0

@@ -7,7 +7,7 @@ make setup        # .venv with runtime + dev dependencies
 make check        # ruff check, ruff format --check, unit tests
 make test-smoke   # end-to-end against the fake ServerQuery server
 make run-fake     # run the exporter locally and scrape it by hand
-make docker-healthcheck  # build the image, test its HEALTHCHECK (needs Docker)
+make docker-test  # build the image, test HEALTHCHECK and shutdown (needs Docker)
 ```
 
 `make run-fake` starts a fake TeamSpeak ServerQuery interface and the real
@@ -38,7 +38,7 @@ make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 | `tests/test_service.py` | Poll sequence, error survival, series lifecycle, backoff |
 | `tests/test_smoke.py` | Subprocess boot → scrape `/metrics`, flood and outage survival, healthcheck probe, `python app.py` against a hostile server |
 | `tests/test_healthcheck.py` | `healthcheck.py` against a fake `/proc`: finding the exporter, port resolution, no secret leaks |
-| `tests/container_healthcheck.sh` | The built image's `HEALTHCHECK` in every port configuration, via `make docker-healthcheck` |
+| `tests/container_test.sh` | The built image: `HEALTHCHECK` in every port configuration and a clean `docker stop`, via `make docker-test` |
 
 ## Markers
 
@@ -75,9 +75,9 @@ docker run -d --name ts3 -p 127.0.0.1:10011:10011 \
 
 Replace `virtualserver_unique_identifier` before committing.
 
-## The container healthcheck
+## The container test
 
-`make docker-healthcheck` builds the image and starts it eight ways — default,
+`make docker-test` builds the image and starts it eight ways — default,
 `METRICS_PORT`, `--metricsport` in the command, behind `--init`, behind
 `sh -c`, env and flag both set, with an unreachable HTTP proxy in the
 environment, and without an exporter — then waits for Docker's verdict on
@@ -85,6 +85,11 @@ each. The first seven must turn healthy, the last unhealthy,
 and no healthcheck output may contain the password passed in one of them. CI
 runs it in the `docker` job. It takes about 20 seconds and needs no TeamSpeak
 server.
+
+It then stops three of them — default, behind `--init`, behind `sh -c` — with
+`docker stop`, and requires exit code 0 within 5 seconds and `Stopped` in the
+log. Without a SIGTERM handler the exporter, as PID 1, would ignore the signal
+and be killed after Docker's 10-second grace period (exit code 137).
 
 ## Adding a metric
 
