@@ -139,6 +139,15 @@ named after the password is exported as `*censored*`.
 A very short password is replaced wherever it appears, also inside unrelated
 text. That over-censors, but never leaks.
 
+`redact()` guarantees its result contains no secret. It replaces in one pass
+over the original text, longest secret first, with `*censored*` — and checks.
+If a secret is still there, because it sits inside the marker (a password
+`censor`, which the settings banner would otherwise print as part of
+`*censored*`) or re-forms across the marker's edge, the pass is repeated with a
+marker made of a character that occurs in no secret, e.g. `########`, which
+cannot contain or re-form one. A seeded fuzz test checks this over thousands of
+small-alphabet cases.
+
 ## Series lifecycle
 
 After every poll that got a `serverlist`, the series of virtualservers that

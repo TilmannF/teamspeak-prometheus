@@ -7,6 +7,7 @@ Server-provided text is untrusted (AGENTS.md, "Secrets"). These tests feed the
 from __future__ import annotations
 
 import logging
+import random
 import sys
 
 import pytest
@@ -212,3 +213,65 @@ def test_a_hostile_server_cannot_get_the_password_into_the_log(caplog, redaction
     assert SECRET not in caplog.text
     assert not any(line.startswith('2026-01-01') for line in caplog.text.splitlines())
     assert '*censored*' in caplog.text
+
+
+# -- redact() never leaves a secret behind ------------------------------------
+
+
+def redacted(text: str, *secrets: str) -> str:
+    return app.redact(text, app.secrets_for_redaction(list(secrets)))
+
+
+def test_an_ordinary_password_becomes_the_usual_marker():
+    assert redacted('login with hunter2', 'hunter2') == 'login with *censored*'
+
+
+@pytest.mark.parametrize(
+    'secret', ['*censored*', 'censor', '*', 'c', 'red', '*censored', 'd*']
+)
+def test_a_password_inside_the_marker_is_still_removed(secret):
+    text = f'login failed for {secret}; Password: *censored*'
+
+    assert secret not in redacted(text, secret)
+
+
+def test_a_password_rebuilt_across_the_marker_boundary_is_removed():
+    # '*censored*' + 'b' would contain 'd*b' again
+    assert 'd*b' not in redacted('d*bb', 'd*b')
+
+
+def test_the_fallback_marker_avoids_every_character_of_every_secret():
+    secrets = ['#~^%*censored*', '+=_']
+
+    output = redacted('a #~^%*censored* b +=_ c', *secrets)
+
+    assert all(secret not in output for secret in secrets)
+    assert output.startswith('a ') and output.endswith(' c')
+
+
+def test_overlapping_secrets_leave_nothing_behind():
+    assert all(s not in redacted('abab aba', 'ab', 'ba') for s in ('ab', 'ba'))
+
+
+def test_the_settings_banner_never_shows_a_password_it_contains():
+    banner = app.describe_settings(app.resolve_config(app.parse_args([]), {}))
+
+    assert 'censor' not in filtered(banner, secrets=['censor'])
+
+
+def test_no_secret_survives_redaction_fuzzed():
+    # Small alphabets make collisions with the marker and across boundaries
+    # likely; the seed keeps the test deterministic.
+    rng = random.Random(20260924)
+    for alphabet in ('ab', 'd*b', '*censord', 'ab*censored#~'):
+        for _ in range(2_000):
+            secrets = [
+                ''.join(rng.choice(alphabet) for _ in range(rng.randint(1, 4)))
+                for _ in range(rng.randint(1, 3))
+            ]
+            text = ''.join(
+                rng.choice(alphabet + ' ') for _ in range(rng.randint(0, 30))
+            )
+            output = redacted(text, *secrets)
+            leaked = [s for s in secrets if s in output]
+            assert not leaked, (text, secrets, output)

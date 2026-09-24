@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import enum
+import functools
+import itertools
 import logging
 import math
 import os
@@ -761,14 +763,42 @@ def secrets_for_redaction(secrets: list[str]) -> list[str]:
 
 
 def redact(text: str, secrets: list[str]) -> str:
-    """Replace every occurrence of each secret with ``*censored*``.
+    """Replace every occurrence of each secret; guarantee none is left.
+
+    One pass over the original text, secrets matched longest first. The
+    replacement is ``*censored*`` -- unless that would leave a secret in the
+    result: a secret inside the marker itself (a password ``censor``) or
+    re-formed across its edge (``d*b`` from ``…censore**d*`` + ``b``). Then the
+    pass is repeated with a marker made of a character that occurs in no
+    secret, which provably cannot contain or re-form one.
 
     ``secrets`` must come from ``secrets_for_redaction``.
     """
 
-    for secret in secrets:
-        text = text.replace(secret, REDACTED)
-    return text
+    if not secrets:
+        return text
+    pattern = _secrets_pattern(tuple(secrets))
+    result = pattern.sub(lambda _: REDACTED, text)
+    if any(secret in result for secret in secrets):
+        marker = _marker_avoiding(secrets)
+        result = pattern.sub(lambda _: marker, text)
+    return result
+
+
+@functools.lru_cache(maxsize=8)
+def _secrets_pattern(secrets: tuple[str, ...]) -> re.Pattern[str]:
+    return re.compile('|'.join(re.escape(secret) for secret in secrets))
+
+
+def _marker_avoiding(secrets: list[str]) -> str:
+    """Eight copies of the first candidate character in no secret."""
+
+    used = set(''.join(secrets))
+    candidates = itertools.chain(
+        '#~^%', (chr(point) for point in range(0x2580, sys.maxunicode + 1))
+    )
+    character = next(c for c in candidates if c not in used and c.isprintable())
+    return character * 8
 
 
 # ---------------------------------------------------------------------------
