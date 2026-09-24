@@ -15,7 +15,7 @@ import threading
 import time
 from collections import deque
 
-from app import METRICS_NAMES, SafeArgumentParser
+from app import METRICS_NAMES, SafeArgumentParser, redact, secrets_for_redaction
 from tests.serverquery import (
     BANNER,
     LINE_TERMINATOR,
@@ -278,7 +278,14 @@ def main(argv: list[str] | None = None) -> int:
         virtualserver_count=args.virtualservers,
         flood_limit=args.flood_limit,
     ).start()
-    print(f'Fake TS3 ServerQuery listening on {server.host}:{server.port}')
+    # Censored even here: a port number is the password when someone picks it
+    # as one. See AGENTS.md, "Secrets".
+    print(
+        redact(
+            f'Fake TS3 ServerQuery listening on {server.host}:{server.port}',
+            secrets_for_redaction([args.password]),
+        )
+    )
     try:
         threading.Event().wait()
     except KeyboardInterrupt:

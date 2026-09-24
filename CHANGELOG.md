@@ -64,7 +64,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
   `unrecognized arguments: … …`. Configuration errors are censored like every
   other log line.
 - Text from the TeamSpeak server is treated as untrusted: the password is
-  censored from every log line, tracebacks included, and from virtualserver
+  censored from every finished log line — also where it coincides with a
+  number such as the metrics port — tracebacks included, and from virtualserver
   names before they become labels; control characters in log lines are
   escaped so server text cannot forge log lines.
 

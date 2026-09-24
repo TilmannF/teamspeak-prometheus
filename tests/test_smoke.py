@@ -464,3 +464,89 @@ def test_a_hostile_server_cannot_put_the_password_into_the_metrics():
 
     assert PASSWORD not in body
     assert PASSWORD not in output
+
+
+# -- the test tools never print their password, even where it collides -------
+
+
+def run_tool(*argv: str, timeout: float = 20) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, '-u', '-m', *argv],
+        env=app_env(),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def test_the_harness_never_prints_a_password_equal_to_its_metrics_port():
+    port = str(free_port())
+
+    result = run_tool(
+        'tests.exporter_harness',
+        '--metricsport',
+        port,
+        '--ts3password',
+        port,
+        '--iterations',
+        '1',
+        '--interval',
+        '0.2',
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert 'Scrape it with' in output
+    assert port not in output
+
+
+def test_the_harness_never_prints_its_password_when_the_port_is_taken():
+    # all interfaces, like the exporter's metrics server, so the port is taken
+    # for it too (a 127.0.0.1 bind would not collide with a 0.0.0.0 one)
+    with socket.socket() as taken:
+        taken.bind(('', 0))
+        taken.listen()
+        port = str(taken.getsockname()[1])
+
+        result = run_tool(
+            'tests.exporter_harness',
+            '--metricsport',
+            port,
+            '--ts3password',
+            port,
+            '--iterations',
+            '1',
+        )
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert 'Could not listen on port' in output
+    assert port not in output
+
+
+def test_the_fake_server_never_prints_a_password_equal_to_its_port():
+    port = str(free_port())
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            '-u',
+            '-m',
+            'tests.fake_ts3_server',
+            '--port',
+            port,
+            '--password',
+            port,
+        ],
+        env=app_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        first_line = process.stdout.readline()
+    finally:
+        process.terminate()
+        process.communicate(timeout=10)
+
+    assert 'Fake TS3 ServerQuery listening on' in first_line
+    assert port not in first_line

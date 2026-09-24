@@ -1022,13 +1022,18 @@ class RedactingFilter(logging.Filter):
     compromised server could echo the password it was just sent, or embed line
     breaks to fake log lines. On every record this filter
 
-    * replaces each secret with ``*censored*``: in the message, in its
-      arguments, and in a traceback;
     * escapes control characters in string arguments, so one call is always one
       log line. The message template itself is the exporter's own text and may
-      span lines (the settings banner does).
+      span lines (the settings banner does). Numbers are left alone so
+      ``%d``/``%f`` formats keep working;
+    * formats the message and replaces each secret in the finished text with
+      ``*censored*`` -- so also a number that happens to be the password (a
+      metrics port 8000 with password 8000), or a secret split across template
+      and argument -- and in a traceback.
 
-    Numbers pass through untouched so ``%d``/``%f`` formats keep working.
+    A message whose format string does not fit its arguments is kept as
+    template plus arguments instead of raising: logging would otherwise report
+    the error on stderr, arguments included, past this filter.
     """
 
     def __init__(self, secrets: list[str]) -> None:
@@ -1038,18 +1043,25 @@ class RedactingFilter(logging.Filter):
     def redact(self, text: str) -> str:
         return redact(text, self.secrets)
 
-    def clean(self, value: object) -> object:
+    @staticmethod
+    def escape(value: object) -> object:
         if isinstance(value, (int, float)):
             return value
-        text = self.redact(str(value))
-        return _CONTROL_CHARACTERS.sub(lambda match: repr(match.group())[1:-1], text)
+        return _CONTROL_CHARACTERS.sub(
+            lambda match: repr(match.group())[1:-1], str(value)
+        )
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = self.redact(str(record.msg))
         if isinstance(record.args, Mapping):
-            record.args = {key: self.clean(v) for key, v in record.args.items()}
+            record.args = {key: self.escape(v) for key, v in record.args.items()}
         elif record.args:
-            record.args = tuple(self.clean(arg) for arg in record.args)
+            record.args = tuple(self.escape(arg) for arg in record.args)
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError, KeyError):
+            message = f'{record.msg} {self.escape(repr(record.args))}'
+        record.msg = self.redact(message)
+        record.args = None
         if record.exc_info and not record.exc_text:
             record.exc_text = logging.Formatter().formatException(record.exc_info)
         if record.exc_text:

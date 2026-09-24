@@ -139,6 +139,30 @@ def test_the_exporters_own_multi_line_message_is_kept():
     assert filtered(banner) == banner
 
 
+def test_a_number_equal_to_the_password_is_censored():
+    # TEAMSPEAK_PASSWORD=8000 with the default metrics port 8000
+    assert filtered('Started metrics endpoint on port %s', 8000, secrets=['8000']) == (
+        'Started metrics endpoint on port *censored*'
+    )
+    assert filtered('port %d', 8000, secrets=['8000']) == 'port *censored*'
+
+
+def test_a_secret_split_across_template_and_argument_is_censored():
+    assert filtered('value: sec%s', 'ret', secrets=['secret']) == 'value: *censored*'
+
+
+def test_a_broken_format_string_neither_raises_nor_leaks(capsys):
+    entry = record('port %d', f'{SECRET}\nforged')
+
+    app.RedactingFilter([SECRET]).filter(entry)
+    output = formatted(entry)
+
+    assert SECRET not in output
+    assert '\n' not in output
+    assert 'port %d' in output
+    assert SECRET not in capsys.readouterr().err
+
+
 def test_numeric_arguments_keep_their_format():
     assert filtered('waiting %.0fs, %d left', 2.4, 3) == 'waiting 2s, 3 left'
 

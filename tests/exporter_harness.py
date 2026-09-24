@@ -54,8 +54,11 @@ def run(
         start_http_server(config.metrics_port, registry=registry)
     except OSError as err:
         raise SystemExit(
-            f'Could not listen on port {config.metrics_port} ({err}).\n'
-            'Something else is using it -- pass --metricsport to pick another.'
+            app.redact(
+                f'Could not listen on port {config.metrics_port} ({err}).\n'
+                'Something else is using it -- pass --metricsport to pick another.',
+                app.secrets_for_redaction([ts3_password]),
+            )
         ) from err
     app.log.info('Started metrics endpoint on port %s', config.metrics_port)
 
@@ -77,6 +80,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--flood-limit', type=int, default=None)
     parser.add_argument('--flood-window', type=float, default=3.0)
     args = parser.parse_args(argv)
+    secrets = app.secrets_for_redaction([args.ts3password])
+
+    def say(text: str) -> None:
+        # Everything printed is censored like the exporter's log: even a port
+        # number is the password when someone picks it as one. See AGENTS.md.
+        print(app.redact(text, secrets))
 
     fake = None
     ts3_host, ts3_port = args.ts3host, args.ts3port
@@ -88,9 +97,9 @@ def main(argv: list[str] | None = None) -> int:
             flood_window=args.flood_window,
         ).start()
         ts3_host, ts3_port = fake.host, fake.port
-        print(f'Fake TS3 ServerQuery listening on {ts3_host}:{ts3_port}')
+        say(f'Fake TS3 ServerQuery listening on {ts3_host}:{ts3_port}')
 
-    print(f'Scrape it with: curl -s http://127.0.0.1:{args.metricsport}/metrics')
+    say(f'Scrape it with: curl -s http://127.0.0.1:{args.metricsport}/metrics')
     try:
         run(
             ts3_host,

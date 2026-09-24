@@ -114,13 +114,21 @@ server could echo the password it was just sent, or embed line breaks to forge
 log lines. `main()` installs a `RedactingFilter` on the exporter's logger,
 which on every record
 
-* replaces the configured password with `*censored*` — in the message, its
-  arguments, and any traceback;
 * escapes control characters (line breaks, terminal escapes, C1 codes, Unicode
-  line separators) in string arguments, so one log call is always one line.
+  line separators) in string arguments, so one log call is always one line;
+* formats the message, then replaces the password with `*censored*` in the
+  finished text and in any traceback. Censoring the finished text also catches
+  a number that happens to be the password (`TEAMSPEAK_PASSWORD=8000` with the
+  default metrics port 8000) and a secret split across template and argument.
 
-The message templates are the exporter's own text and are left as they are; the
-multi-line settings banner stays readable. Numbers pass through untouched.
+The message templates are the exporter's own text and are not escaped; the
+multi-line settings banner stays readable. Numeric arguments are not escaped
+either, so `%d` keeps working. A format string that does not fit its arguments
+is logged as template plus arguments instead of raising — logging would
+otherwise print its own error report, arguments included, past the filter.
+
+The test harness and the fake server print through `redact()` as well: their
+startup lines contain port numbers, and a port can be the password.
 
 The same applies to metrics: `virtualserver_name` label values come from the
 server too, and `/metrics` is unauthenticated and scraped into long-term
