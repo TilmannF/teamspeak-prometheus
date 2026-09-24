@@ -25,8 +25,17 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
 2. Commit that on a branch, get it reviewed and merged to `master` like any
    other change.
 3. From `master`, tag and push. Release tags are exactly `vMAJOR.MINOR.PATCH`
-   (no prerelease or build suffix, no leading zeros); the release workflow
-   fails on anything else before publishing:
+   (no prerelease or build suffix, no leading zeros), equal to `v` +
+   `__version__`, with a matching `## [X.Y.Z]` section in `CHANGELOG.md`.
+   `.github/scripts/validate-release-tag.sh` checks all three first thing in
+   the release workflow and fails before anything is published. Run it
+   locally before pushing a tag:
+
+   ```bash
+   .github/scripts/validate-release-tag.sh vX.Y.Z
+   ```
+
+   Then:
 
    ```bash
    git tag vX.Y.Z

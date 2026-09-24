@@ -28,6 +28,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
 - A warning at startup for every flag an environment variable overrides. An
   overridden flag is not validated, so a malformed one no longer stops the
   exporter.
+- The release workflow refuses a tag that is not exactly `vX.Y.Z`, does not
+  match `__version__`, or has no CHANGELOG section.
 - Container `HEALTHCHECK` that probes `/metrics` on the port the exporter
   actually uses (`METRICS_PORT` or `--metricsport`), never through a proxy
   from the environment, and deliberately does not depend on TeamSpeak being

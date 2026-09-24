@@ -33,6 +33,7 @@ make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 | `tests/test_client.py` | `ServerQueryClient` against scripted bytes and the real captures |
 | `tests/test_logging.py` | `RedactingFilter`: password censoring, forged-line escaping, a hostile server |
 | `tests/test_cli.py` | Flags as strings, argparse error masking, `main()` never printing the password |
+| `tests/test_release.py` | `__version__` and CHANGELOG agree; the release-tag script accepts only matching `vX.Y.Z` |
 | `tests/test_config.py` | Defaults, environment precedence, validation, override warnings |
 | `tests/test_metrics.py` | The metric contract: names, prefix, label, values, self-metrics |
 | `tests/test_service.py` | Poll sequence, error survival, series lifecycle, backoff |
