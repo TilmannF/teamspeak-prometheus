@@ -56,8 +56,23 @@ def parse_error(argv: list[str], capsys) -> str:
         [SECRET],  # stray positional
         ['--ts3=' + SECRET],  # ambiguous abbreviation
         ['--ts3password', SECRET, '--bogus', 'x'],
+        # a password can itself look like an option
+        ['--ts3pasword', '-' + SECRET],
+        ['--ts3pasword', '--' + SECRET],
+        ['--ts3pasword', '--' + SECRET + '=x'],
+        ['-' + SECRET],
     ],
-    ids=['typo', 'typo-equals', 'positional', 'ambiguous', 'other-unknown'],
+    ids=[
+        'typo',
+        'typo-equals',
+        'positional',
+        'ambiguous',
+        'other-unknown',
+        'dash-value',
+        'double-dash-value',
+        'double-dash-value-with-equals',
+        'lone-dash-value',
+    ],
 )
 def test_argument_errors_never_print_a_value(argv, capsys):
     err = parse_error(argv, capsys)
@@ -66,17 +81,27 @@ def test_argument_errors_never_print_a_value(argv, capsys):
     assert SECRET not in err
 
 
-def test_argument_errors_still_name_the_offending_flag(capsys):
-    err = parse_error(['--ts3pasword', SECRET], capsys)
+def test_unknown_arguments_are_hidden_entirely(capsys):
+    # A mistyped flag name and a dash-prefixed password are indistinguishable,
+    # so no unknown token is shown -- only that values were hidden.
+    err = parse_error(['--ts3pasword', '-' + SECRET], capsys)
 
-    assert 'unrecognized arguments: --ts3pasword …' in err
+    assert 'unrecognized arguments: … … (argument values hidden; see --help)' in err
+
+
+def test_known_flags_stay_visible(capsys):
+    err = parse_error(['--ts3password=' + SECRET, '--ts3host'], capsys)
+
+    assert 'argument --ts3host: expected one argument' in err
+    assert SECRET not in err
 
 
 def test_masking_replaces_whole_values_only(capsys):
     # the password "3" must not turn "--ts3port" into "--ts…port"
-    err = parse_error(['--ts3password', '3', '--bogus', '3'], capsys)
+    err = parse_error(['--ts3password', '3', '--ts3=3'], capsys)
 
-    assert 'unrecognized arguments: --bogus …' in err
+    assert 'could match --ts3host, --ts3port' in err
+    assert 'ambiguous option: … could match' in err
 
 
 def test_a_flag_missing_its_value_is_still_reported(capsys):

@@ -210,9 +210,12 @@ environment variable, used or overridden. A configuration error that quotes an
 invalid value equal to the password therefore prints `*censored*`.
 
 argparse prints its own errors to stderr, outside logging.
-`SafeArgumentParser` masks every value-like fragment of the command line
-(anything not starting with `-`, and anything after `=`) with `…`, so a typo
-such as `--ts3pasword <password>` reports
-`unrecognized arguments: --ts3pasword …`. Only whole fragments are masked; a
-password `3` leaves `--ts3port` intact. The test harness and the fake server use
+`SafeArgumentParser` keeps only the option strings it defines visible
+(`--ts3host`, `--help`, …) and replaces every other command-line token with
+`…`, as well as anything after `=`. Unknown tokens starting with `-` are masked
+too: a mistyped `--ts3pasword` and a password `-secret` cannot be told apart.
+So `--ts3pasword <password>` reports
+`unrecognized arguments: … … (argument values hidden; see --help)`, while
+`argument --ts3port: expected one argument` stays readable. Only whole
+fragments are masked; a password `3` leaves `--ts3port` intact. The test harness and the fake server use
 it too, and a test scans the repository for any parser that does not.

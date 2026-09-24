@@ -434,9 +434,10 @@ class SafeArgumentParser(argparse.ArgumentParser):
     argparse quotes command-line fragments in its errors -- ``unrecognized
     arguments: --ts3pasword <password>`` after a typo, ``ambiguous option:
     --ts3=<password>`` -- and prints them to stderr, where no logging filter
-    sees them. Every value-like fragment of the command line (anything not
-    starting with ``-``, and anything after ``=``) is replaced by ``…`` before
-    the message is printed.
+    sees them. Only option strings this parser defines stay visible; every
+    other token is replaced by ``…``, and so is anything after ``=``. That
+    includes tokens starting with ``-``: an unknown ``--ts3pasword`` and a
+    password ``-secret`` look alike, so neither can be shown.
     """
 
     _argv: list[str] = []
@@ -446,23 +447,33 @@ class SafeArgumentParser(argparse.ArgumentParser):
         return super().parse_known_args(args, namespace)
 
     def error(self, message: str) -> NoReturn:
-        super().error(_mask_values(message, self._argv))
+        super().error(
+            _mask_values(message, self._argv, set(self._option_string_actions))
+        )
 
 
-def _mask_values(message: str, argv: list[str]) -> str:
+def _mask_values(message: str, argv: list[str], known: set[str]) -> str:
+    """Replace every command-line fragment except known option strings."""
+
     fragments = set()
     for token in argv:
-        if token.startswith('-'):
-            _, separator, value = token.partition('=')
-            if separator and value:
+        name, separator, value = token.partition('=')
+        if token in known:
+            continue
+        if separator and name in known:
+            if value:
                 fragments.add(value)
-        elif token:
+            continue
+        if token:
             fragments.add(token)
+    masked = message
     for fragment in sorted(fragments, key=len, reverse=True):
         # Whole fragments only: a value "3" must not mangle "--ts3port".
         pattern = r'(?<![^\s\'"=])' + re.escape(fragment) + r'(?![^\s\'"])'
-        message = re.sub(pattern, '…', message)
-    return message
+        masked = re.sub(pattern, '…', masked)
+    if masked != message:
+        masked += ' (argument values hidden; see --help)'
+    return masked
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

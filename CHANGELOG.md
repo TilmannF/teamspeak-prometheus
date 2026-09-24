@@ -59,9 +59,10 @@ It is the state as shipped: what a user gets if they pull this tag today.
   ServerQuery errors: it logs, counts the error, and retries with backoff
   (doubling, capped at 60 seconds or the poll interval if that is longer).
 - The poll interval is measured start to start.
-- Command-line errors never repeat a value (a mistyped `--ts3pasword <password>`
-  is reported as `--ts3pasword …`), and configuration errors are censored like
-  every other log line.
+- Command-line errors never repeat a value: only the exporter's own flag names
+  stay visible, so a mistyped `--ts3pasword <password>` is reported as
+  `unrecognized arguments: … …`. Configuration errors are censored like every
+  other log line.
 - Text from the TeamSpeak server is treated as untrusted: the password is
   censored from every log line, tracebacks included, and from virtualserver
   names before they become labels; control characters in log lines are
