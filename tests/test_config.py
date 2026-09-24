@@ -1,4 +1,4 @@
-"""Configuration resolution: defaults, environment precedence, port parsing."""
+"""Configuration resolution: defaults, environment precedence, validation."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ def test_defaults_match_the_documented_values():
         username='serveradmin',
         password='',
         metrics_port=8000,
+        poll_interval=5.0,
+        log_level='INFO',
     )
 
 
@@ -36,6 +38,10 @@ def test_command_line_arguments_are_used_when_no_environment_is_set():
             'SomePassword',
             '--metricsport',
             '8080',
+            '--pollinterval',
+            '30',
+            '--loglevel',
+            'debug',
         ]
     )
 
@@ -44,19 +50,25 @@ def test_command_line_arguments_are_used_when_no_environment_is_set():
     assert config.username == 'ExampleUser'
     assert config.password == 'SomePassword'
     assert config.metrics_port == 8080
+    assert config.poll_interval == 30
+    assert config.log_level == 'DEBUG'
 
 
 def test_environment_overrides_command_line_arguments():
     config = resolve(
-        ['--ts3host', 'from-flag', '--ts3username', 'from-flag'],
+        ['--ts3host', 'from-flag', '--ts3username', 'from-flag', '--pollinterval', '9'],
         TEAMSPEAK_HOST='from-env',
         TEAMSPEAK_USERNAME='env-user',
         TEAMSPEAK_PASSWORD='env-password',
+        TEAMSPEAK_POLL_INTERVAL='15',
+        LOG_LEVEL='warning',
     )
 
     assert config.host == 'from-env'
     assert config.username == 'env-user'
     assert config.password == 'env-password'
+    assert config.poll_interval == 15
+    assert config.log_level == 'WARNING'
 
 
 def test_ports_from_the_environment_are_integers():
@@ -66,10 +78,54 @@ def test_ports_from_the_environment_are_integers():
     assert config.metrics_port == 9000
 
 
-@pytest.mark.parametrize('variable', ['TEAMSPEAK_PORT', 'METRICS_PORT'])
-def test_a_non_numeric_port_fails_with_a_clear_error(variable: str):
+def test_a_fractional_poll_interval_is_allowed():
+    assert resolve(TEAMSPEAK_POLL_INTERVAL='2.5').poll_interval == 2.5
+
+
+@pytest.mark.parametrize(
+    ('variable', 'value'),
+    [
+        ('TEAMSPEAK_PORT', 'not-a-port'),
+        ('METRICS_PORT', 'not-a-port'),
+        ('METRICS_PORT', '70000'),
+        ('TEAMSPEAK_POLL_INTERVAL', 'soon'),
+        ('TEAMSPEAK_POLL_INTERVAL', '0'),
+        ('TEAMSPEAK_POLL_INTERVAL', '-5'),
+        ('LOG_LEVEL', 'chatty'),
+    ],
+)
+def test_invalid_values_fail_with_a_clear_error(variable: str, value: str):
     with pytest.raises(app.ExporterError, match=variable):
-        resolve(**{variable: 'not-a-port'})
+        resolve(**{variable: value})
+
+
+def test_an_overridden_flag_is_reported():
+    args = app.parse_args(['--ts3host', 'from-flag', '--ts3port', '10011'])
+
+    overridden = app.overridden_flags(
+        args, {'TEAMSPEAK_HOST': 'from-env', 'TEAMSPEAK_PORT': '10011'}
+    )
+
+    assert overridden == ['--ts3host (TEAMSPEAK_HOST is set)']
+
+
+def test_an_overridden_password_flag_is_reported_without_either_value():
+    args = app.parse_args(['--ts3password', 'flag-secret'])
+
+    overridden = app.overridden_flags(args, {'TEAMSPEAK_PASSWORD': 'env-secret'})
+
+    assert overridden == ['--ts3password (TEAMSPEAK_PASSWORD is set)']
+
+
+def test_equal_values_in_different_spelling_are_not_reported():
+    args = app.parse_args(['--pollinterval', '5', '--loglevel', 'info'])
+
+    assert (
+        app.overridden_flags(
+            args, {'TEAMSPEAK_POLL_INTERVAL': '5.0', 'LOG_LEVEL': 'INFO'}
+        )
+        == []
+    )
 
 
 def test_the_settings_banner_never_contains_the_password():

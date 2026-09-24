@@ -8,10 +8,6 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
-# The exporter has always used %-formatting for its console output. Converting
-# it is bundled with the print -> logging item in docs/modernization-backlog.md,
-# not done piecemeal.
-ignore = ["UP031"]
 
 [tool.ruff.format]
 # The existing code uses single quotes. Keep it that way.

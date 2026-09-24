@@ -1,10 +1,10 @@
-"""In-process fakes for unit tests. No sockets, no ``ts3`` package."""
+"""In-process fakes for unit tests. No sockets."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app import METRICS_NAMES
+from app import METRICS_NAMES, LoginFailed, ServerQueryError
 
 
 def serverinfo(virtualserver_name: str, base: int = 0) -> dict[str, object]:
@@ -14,16 +14,6 @@ def serverinfo(virtualserver_name: str, base: int = 0) -> dict[str, object]:
     for offset, metric in enumerate(METRICS_NAMES):
         info[metric] = base + offset
     return info
-
-
-@dataclass
-class FakeResponse:
-    data: list[dict[str, object]]
-    msg: str = 'ok'
-
-    @property
-    def response(self) -> dict[str, str]:
-        return {'id': '0' if self.msg == 'ok' else '1', 'msg': self.msg}
 
 
 @dataclass
@@ -37,38 +27,45 @@ class FakeTs3Client:
         ]
     )
     login_succeeds: bool = True
-    serverlist_msg: str = 'ok'
-    serverinfo_msg: str = 'ok'
+    serverlist_error: str | None = None
+    # virtualserver ids whose ``use`` fails, e.g. because they are stopped
+    offline: set[int] = field(default_factory=set)
+    # field names left out of every serverinfo payload
+    missing: set[str] = field(default_factory=set)
     calls: list[tuple[str, object]] = field(default_factory=list)
-    disconnected: bool = False
+    closed: bool = False
+    _selected: object = None
 
-    def login(self, username: str, password: str) -> bool:
+    def login(self, username: str, password: str) -> None:
         self.calls.append(('login', username))
-        return self.login_succeeds
+        if not self.login_succeeds:
+            raise LoginFailed('login', 520, 'invalid loginname or password')
 
-    def serverlist(self) -> FakeResponse:
+    def serverlist(self) -> list[dict[str, object]]:
         self.calls.append(('serverlist', None))
-        return FakeResponse(data=list(self.servers), msg=self.serverlist_msg)
+        if self.serverlist_error:
+            raise ServerQueryError('serverlist', 1281, self.serverlist_error)
+        return list(self.servers)
 
-    def use(self, virtualserver_id: object) -> FakeResponse:
+    def use(self, virtualserver_id: object) -> None:
         self.calls.append(('use', virtualserver_id))
+        if virtualserver_id in self.offline:
+            raise ServerQueryError('use', 1033, 'server is not running')
         self._selected = virtualserver_id
-        return FakeResponse(data=[])
 
-    def send_command(self, command: str) -> FakeResponse:
-        self.calls.append(('send_command', command))
-        selected = getattr(self, '_selected', 1)
+    def serverinfo(self) -> dict[str, object]:
+        self.calls.append(('serverinfo', self._selected))
         name = next(
             server['virtualserver_name']
             for server in self.servers
-            if server['virtualserver_id'] == selected
+            if server['virtualserver_id'] == self._selected
         )
-        base = 1000 * int(selected)
-        return FakeResponse(data=[serverinfo(str(name), base)], msg=self.serverinfo_msg)
+        info = serverinfo(str(name), 1000 * int(self._selected))
+        return {key: value for key, value in info.items() if key not in self.missing}
 
-    def disconnect(self) -> None:
-        self.calls.append(('disconnect', None))
-        self.disconnected = True
+    def close(self) -> None:
+        self.calls.append(('close', None))
+        self.closed = True
 
 
 def factory_for(client: FakeTs3Client):
@@ -79,3 +76,31 @@ def factory_for(client: FakeTs3Client):
         return client
 
     return make
+
+
+def unreachable(host: str, port: int) -> FakeTs3Client:
+    """A ``ClientFactory`` for a server that refuses connections."""
+
+    raise ConnectionRefusedError(111, 'Connection refused')
+
+
+class FakeConnection:
+    """A scripted socket: ``recv`` hands out ``replies`` one chunk at a time.
+
+    Everything the client sends is kept in ``sent`` so tests can assert on the
+    exact wire bytes.
+    """
+
+    def __init__(self, *replies: bytes) -> None:
+        self.replies = list(replies)
+        self.sent: list[bytes] = []
+        self.closed = False
+
+    def sendall(self, data: bytes, /) -> None:
+        self.sent.append(data)
+
+    def recv(self, bufsize: int, /) -> bytes:
+        return self.replies.pop(0) if self.replies else b''
+
+    def close(self) -> None:
+        self.closed = True

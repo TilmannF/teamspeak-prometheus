@@ -62,7 +62,7 @@ def unescape(value: str) -> str:
 def encode_pairs(pairs: dict[str, object]) -> str:
     """Render one ``key=value`` record."""
 
-    return ' '.join('%s=%s' % (key, escape(value)) for key, value in pairs.items())
+    return ' '.join(f'{key}={escape(value)}' for key, value in pairs.items())
 
 
 def encode_records(records: list[dict[str, object]]) -> str:

@@ -20,6 +20,11 @@ def gauges(registry: CollectorRegistry) -> dict[str, object]:
 
 
 @pytest.fixture
+def exporter_metrics(registry: CollectorRegistry) -> app.ExporterMetrics:
+    return app.build_exporter_metrics(registry)
+
+
+@pytest.fixture
 def sample_serverinfo() -> dict[str, object]:
     return serverinfo('Test Server')
 
