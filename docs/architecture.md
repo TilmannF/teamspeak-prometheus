@@ -101,7 +101,7 @@ data. Backoff doubles the wait per consecutive failed poll, capped at
 `max(60s, poll interval)`, and resets on the next poll that reaches the server.
 A **partial** poll does not back off.
 
-## Logging untrusted text
+## Untrusted server text: logs and labels
 
 Error messages and virtualserver names come from the TeamSpeak server and are
 logged as arguments of log calls. They are untrusted: a hostile or compromised
@@ -116,6 +116,12 @@ which on every record
 
 The message templates are the exporter's own text and are left as they are; the
 multi-line settings banner stays readable. Numbers pass through untouched.
+
+The same applies to metrics: `virtualserver_name` label values come from the
+server too, and `/metrics` is unauthenticated and scraped into long-term
+storage. The service passes every server-supplied name through `redact()` —
+the function the filter uses — before it becomes a label, so a virtualserver
+named after the password is exported as `*censored*`.
 
 A very short password is replaced wherever it appears, also inside unrelated
 text. That over-censors, but never leaks.

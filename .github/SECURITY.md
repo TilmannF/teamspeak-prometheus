@@ -32,9 +32,9 @@ HTTP endpoint. The things worth reporting:
   exporter on the same host or a private network.
 - **The TeamSpeak server is trusted with the password**, necessarily: it is
   sent there to log in. What a hostile server answers is treated as untrusted
-  — the password is censored from every log line and control characters are
-  escaped, so server text can neither leak the password into logs nor forge
-  log lines.
+  — the password is censored from every log line and every metric label, and
+  control characters in log lines are escaped, so server text can neither
+  leak the password into logs or `/metrics` nor forge log lines.
 
 ## Not in scope
 

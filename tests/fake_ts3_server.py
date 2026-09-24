@@ -117,7 +117,7 @@ class _Handler(socketserver.StreamRequestHandler):
                     self._error(520, 'invalid loginname or password')
                 continue
             if command == 'serverlist':
-                self._data(encode_records(self.server.virtualservers))
+                self._data(encode_records(self._listed()))
                 continue
             if command == 'use':
                 selected = self._find(keys.get('sid'))
@@ -141,9 +141,20 @@ class _Handler(socketserver.StreamRequestHandler):
                 if selected is None:
                     self._error(1024, 'invalid serverID')
                 else:
-                    self._data(encode_pairs(serverinfo(selected)))
+                    self._data(encode_pairs(serverinfo(self._named(selected))))
                 continue
             self._error(256, 'command not found')
+
+    def _named(self, server: dict[str, object]) -> dict[str, object]:
+        """A hostile server names virtualserver 1 after the password."""
+
+        if self.server.hostile and server['virtualserver_id'] == 1:
+            name = f'{server["virtualserver_name"]} {self.server.password}'
+            return {**server, 'virtualserver_name': name}
+        return server
+
+    def _listed(self) -> list[dict[str, object]]:
+        return [self._named(server) for server in self.server.virtualservers]
 
     def _find(self, sid: str | None) -> dict[str, object] | None:
         return next(
@@ -193,7 +204,8 @@ class FakeTs3Server:
 
     ``hostile`` makes it behave like a compromised server: a rejected login and
     ``use`` of virtualserver 2 answer with error text that echoes the password
-    and embeds a line break followed by ``FORGED_LOG_LINE``.
+    and embeds a line break followed by ``FORGED_LOG_LINE``, and virtualserver 1
+    is named after the password.
     """
 
     def __init__(

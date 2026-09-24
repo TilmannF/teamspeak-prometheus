@@ -5,7 +5,7 @@ from __future__ import annotations
 import signal
 
 import pytest
-from prometheus_client import CollectorRegistry
+from prometheus_client import CollectorRegistry, generate_latest
 
 import app
 from tests.fakes import FakeTs3Client, factory_for, unreachable
@@ -397,6 +397,26 @@ def test_sigterm_raises_shutdown():
             handler(signal.SIGTERM, None)
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+def test_the_password_never_reaches_the_metrics():
+    # A hostile server reports the password it was just sent as a name.
+    setup = Setup(
+        servers=[
+            {'virtualserver_id': 1, 'virtualserver_name': f'First {CONFIG.password}'},
+            {'virtualserver_id': 2, 'virtualserver_name': CONFIG.password},
+        ],
+        missing={'virtualserver_uptime'},
+    )
+
+    setup.service.poll()
+
+    exposition = generate_latest(setup.registry).decode()
+    assert CONFIG.password not in exposition
+    assert 'virtualserver_name="First *censored*"' in exposition
+    assert 'teamspeak_exporter_missing_fields{virtualserver_name="*censored*"}' in (
+        exposition
+    )
 
 
 def test_the_password_never_reaches_the_log(caplog):

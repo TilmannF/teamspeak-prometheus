@@ -63,8 +63,9 @@ The production client is tested against three independent things:
 * **The fake server.** Two-line banner, `\n\r` framing, error trailers and
   TeamSpeak-style flood protection, over real TCP. `stopped={2}` reports a
   virtualserver `offline` and fails `use` on it with error 1033. With `hostile=True` it
-  echoes the password and embeds forged log lines in its error text, to prove
-  neither reaches the log.
+  echoes the password and embeds forged log lines in its error text, and names
+  a virtualserver after the password, to prove none of it reaches the log or
+  `/metrics`.
 
 To refresh the captures, run the official image and record the raw responses:
 

@@ -238,6 +238,14 @@ def run_app(
     """Run the real entry point, ``python app.py``, until ``until`` shows up in
     a scrape; return everything it logged."""
 
+    return scrape_app(env, until, argv)[0]
+
+
+def scrape_app(
+    env: dict[str, str], until: re.Pattern[str], argv: tuple[str, ...] = ()
+) -> tuple[str, str]:
+    """Like ``run_app``, and also return the scrape that matched."""
+
     port = free_port()
     process = subprocess.Popen(
         [sys.executable, '-u', 'app.py', *argv],
@@ -246,13 +254,13 @@ def run_app(
         stderr=subprocess.STDOUT,
         text=True,
     )
+    body = ''
     try:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             try:
-                if until.search(
-                    HTTP.get(f'http://127.0.0.1:{port}/metrics', timeout=2).text
-                ):
+                body = HTTP.get(f'http://127.0.0.1:{port}/metrics', timeout=2).text
+                if until.search(body):
                     break
             except requests.RequestException:
                 pass
@@ -261,7 +269,7 @@ def run_app(
             raise AssertionError(f'never saw {until.pattern}')
     finally:
         output = stop(process)
-    return output
+    return output, body
 
 
 @pytest.mark.parametrize(
@@ -440,3 +448,19 @@ def test_sigterm_stops_the_exporter_cleanly(target, trickling_server):
     assert elapsed < 3
     assert 'Stopped' in output
     assert 'Traceback' not in output
+
+
+def test_a_hostile_server_cannot_put_the_password_into_the_metrics():
+    # virtualserver 1 is named "Test Server <password>" by the hostile server
+    with FakeTs3Server(password=PASSWORD, hostile=True) as server:
+        output, body = scrape_app(
+            {
+                'TEAMSPEAK_HOST': server.host,
+                'TEAMSPEAK_PORT': str(server.port),
+                'TEAMSPEAK_PASSWORD': PASSWORD,
+            },
+            re.compile(r'virtualserver_name="Test Server \*censored\*"'),
+        )
+
+    assert PASSWORD not in body
+    assert PASSWORD not in output

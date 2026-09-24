@@ -728,6 +728,31 @@ def _remove_series(metric: Gauge, virtualserver_name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+
+REDACTED = '*censored*'
+
+
+def secrets_for_redaction(secrets: list[str]) -> list[str]:
+    """Non-empty and longest first, so a secret containing another is
+    replaced whole."""
+
+    return sorted({s for s in secrets if s}, key=len, reverse=True)
+
+
+def redact(text: str, secrets: list[str]) -> str:
+    """Replace every occurrence of each secret with ``*censored*``.
+
+    ``secrets`` must come from ``secrets_for_redaction``.
+    """
+
+    for secret in secrets:
+        text = text.replace(secret, REDACTED)
+    return text
+
+
+# ---------------------------------------------------------------------------
 # Polling
 # ---------------------------------------------------------------------------
 
@@ -760,6 +785,10 @@ class Teamspeak3MetricService:
         self.clock = clock
         self.known_virtualservers: set[str] = set()
         self._warned_missing: set[tuple[str, str]] = set()
+        # Label values come from the server and are untrusted, like its log
+        # text: a hostile server could name a virtualserver after the password
+        # it was just sent, and /metrics is unauthenticated.
+        self._secrets = secrets_for_redaction([config.password])
         # virtualserver id -> status, for those serverlist reports not online
         self._not_online: dict[str, str] = {}
         # names shared by several virtualservers, already warned about
@@ -825,10 +854,13 @@ class Teamspeak3MetricService:
                     self.exporter_metrics.poll_errors.labels(reason='query').inc()
                     result = PollResult.PARTIAL
                     continue
-                name = str(
-                    serverinfo.get(VIRTUALSERVER_LABEL)
-                    or server.get(VIRTUALSERVER_LABEL)
-                    or f'virtualserver {virtualserver_id}'
+                name = redact(
+                    str(
+                        serverinfo.get(VIRTUALSERVER_LABEL)
+                        or server.get(VIRTUALSERVER_LABEL)
+                        or f'virtualserver {virtualserver_id}'
+                    ),
+                    self._secrets,
                 )
                 self._record(name, serverinfo)
                 seen.add(name)
@@ -949,7 +981,6 @@ def poll_forever(
         sleep(max(next_delay(interval_in_seconds, failures) - (clock() - started), 0))
 
 
-REDACTED = '*censored*'
 # C0 and C1 control characters, DEL, and the Unicode line and paragraph
 # separators some log viewers break lines on. Tab stays readable.
 _CONTROL_CHARACTERS = re.compile(r'[\x00-\x08\x0a-\x1f\x7f-\x9f\u2028\u2029]')
@@ -974,13 +1005,10 @@ class RedactingFilter(logging.Filter):
 
     def __init__(self, secrets: list[str]) -> None:
         super().__init__()
-        # Longest first, so a secret containing another is replaced whole.
-        self.secrets = sorted({s for s in secrets if s}, key=len, reverse=True)
+        self.secrets = secrets_for_redaction(secrets)
 
     def redact(self, text: str) -> str:
-        for secret in self.secrets:
-            text = text.replace(secret, REDACTED)
-        return text
+        return redact(text, self.secrets)
 
     def clean(self, value: object) -> object:
         if isinstance(value, (int, float)):

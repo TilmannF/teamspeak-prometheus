@@ -60,7 +60,7 @@ The settings banner censors it today. Keep it censored.
 
 Command-line errors are printed by argparse, outside logging; `_ArgumentParser` masks every value in them. Do not add argparse `type=` or `choices=`: flags are validated by the option parsers in `_OPTIONS`, after environment precedence.
 
-Text from the TeamSpeak server is untrusted. It reaches the log only as arguments of log calls, where the `RedactingFilter` installed by `main()` censors the password and escapes control characters. Never pre-format server text into a log message, and never write it anywhere else unfiltered.
+Text from the TeamSpeak server is untrusted. It reaches the log only as arguments of log calls, where the `RedactingFilter` installed by `main()` censors the password and escapes control characters. It reaches `/metrics` only as `virtualserver_name` label values, which the service passes through `redact()` first. Never pre-format server text into a log message, never add a server-supplied label without `redact()`, and never write server text anywhere else unfiltered.
 
 `--ts3password` exposes the password through the process list. The documentation MUST keep recommending `TEAMSPEAK_PASSWORD` instead. Do not remove the flag — it is existing public behavior.
 

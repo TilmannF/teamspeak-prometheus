@@ -61,9 +61,10 @@ It is the state as shipped: what a user gets if they pull this tag today.
 - Command-line errors never repeat a value (a mistyped `--ts3pasword <password>`
   is reported as `--ts3pasword …`), and configuration errors are censored like
   every other log line.
-- Text from the TeamSpeak server is treated as untrusted in logs: the password
-  is censored from every log line, tracebacks included, and control
-  characters are escaped so server text cannot forge log lines.
+- Text from the TeamSpeak server is treated as untrusted: the password is
+  censored from every log line, tracebacks included, and from virtualserver
+  names before they become labels; control characters in log lines are
+  escaped so server text cannot forge log lines.
 
 ### Fixed
 
