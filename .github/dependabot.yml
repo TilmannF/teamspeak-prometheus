@@ -28,10 +28,3 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 3
-    # The base image is pinned to 3.12: nikdoof/python-ts3 imports telnetlib,
-    # removed in Python 3.13, so the exporter cannot run on a newer
-    # interpreter until docs/modernization-backlog.md item 1 is done. Without
-    # this, Dependabot proposes a 3.13+ bump that would break the image.
-    ignore:
-      - dependency-name: "python"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]

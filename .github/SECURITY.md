@@ -27,9 +27,9 @@ HTTP endpoint. The things worth reporting:
 - **`--ts3password` exposes the password through the process list.** Use the
   `TEAMSPEAK_PASSWORD` environment variable instead. The flag is kept for
   backwards compatibility and documented as risky.
-- **The pinned TeamSpeak client library is archived and unmaintained** (see
-  [docs/modernization-backlog.md](../docs/modernization-backlog.md), item 1).
-  Replacing it is tracked work, not a secret.
+- **Raw ServerQuery is unencrypted.** The password travels in cleartext
+  between exporter and TeamSpeak, as with every raw ServerQuery client. Run the
+  exporter on the same host or a private network.
 
 ## Not in scope
 
