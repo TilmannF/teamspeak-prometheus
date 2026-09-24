@@ -160,3 +160,22 @@ Environment variables win over command-line arguments. That is long-standing
 behavior and is relied on by the Docker usage in the README, so it is preserved
 exactly. Since 1.0.0 the exporter logs a warning naming each flag that an
 environment variable overrides with a different value.
+
+argparse reads every flag as a plain string and validates nothing. Each option
+has one parser in `_OPTIONS`, used by `resolve_config` for whichever value wins
+— so a malformed flag that an environment variable overrides is ignored with
+that warning instead of stopping the exporter, and an error for a value that is
+used names both spellings: `TEAMSPEAK_PORT (--ts3port) must be a port number`.
+
+## Startup and secrets
+
+`main()` installs the `RedactingFilter` before it parses or validates anything:
+first with `TEAMSPEAK_PASSWORD`, then with every password given — flag and
+environment variable, used or overridden. A configuration error that quotes an
+invalid value equal to the password therefore prints `*censored*`.
+
+argparse prints its own errors to stderr, outside logging. `_ArgumentParser`
+masks every value-like fragment of the command line (anything not starting with
+`-`, and anything after `=`) with `…`, so a typo such as
+`--ts3pasword <password>` reports `unrecognized arguments: --ts3pasword …`.
+Only whole fragments are masked; a password `3` leaves `--ts3port` intact.

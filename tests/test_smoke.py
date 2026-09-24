@@ -223,19 +223,23 @@ def test_the_healthcheck_probe_ignores_a_proxy_in_the_environment(
     healthcheck.probe(port)
 
 
-def run_app(env: dict[str, str], until: re.Pattern[str]) -> str:
+def app_env(**env: str) -> dict[str, str]:
+    """A minimal environment for ``python app.py``: nothing inherited that
+    could point the exporter somewhere else."""
+
+    return {'PATH': os.environ.get('PATH', ''), **env}
+
+
+def run_app(
+    env: dict[str, str], until: re.Pattern[str], argv: tuple[str, ...] = ()
+) -> str:
     """Run the real entry point, ``python app.py``, until ``until`` shows up in
     a scrape; return everything it logged."""
 
     port = free_port()
     process = subprocess.Popen(
-        [sys.executable, '-u', 'app.py'],
-        env={
-            'PATH': os.environ.get('PATH', ''),
-            'METRICS_PORT': str(port),
-            'TEAMSPEAK_POLL_INTERVAL': '0.2',
-            **env,
-        },
+        [sys.executable, '-u', 'app.py', *argv],
+        env=app_env(METRICS_PORT=str(port), TEAMSPEAK_POLL_INTERVAL='0.2', **env),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -283,3 +287,45 @@ def test_a_hostile_server_cannot_put_the_password_or_forged_lines_in_the_log(
     # the server's text is logged -- censored, and on the same line, escaped
     assert redacted + FORGED_LOG_LINE in output
     assert not any(line.startswith(FORGED_LOG_LINE) for line in output.splitlines())
+
+
+@pytest.mark.parametrize(
+    ('argv', 'env', 'secret'),
+    [
+        (['--ts3pasword', PASSWORD], {}, PASSWORD),
+        (['--ts3=' + PASSWORD], {}, PASSWORD),
+        (['--ts3password', '70000', '--ts3port', '70000'], {}, '70000'),
+        ([], {'TEAMSPEAK_PASSWORD': '70000', 'METRICS_PORT': '70000'}, '70000'),
+    ],
+    ids=['typo', 'ambiguous', 'invalid-equals-password', 'environment'],
+)
+def test_a_bad_command_line_exits_without_printing_the_password(argv, env, secret):
+    result = subprocess.run(
+        [sys.executable, 'app.py', *argv],
+        env=app_env(**env),
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 2
+    assert 'error' in (result.stdout + result.stderr).lower()
+    assert secret not in result.stdout + result.stderr
+
+
+def test_a_malformed_flag_overridden_by_the_environment_does_not_stop_startup():
+    with FakeTs3Server(password=PASSWORD) as server:
+        output = run_app(
+            {
+                'TEAMSPEAK_HOST': server.host,
+                'TEAMSPEAK_PORT': str(server.port),
+                'TEAMSPEAK_PASSWORD': PASSWORD,
+                'LOG_LEVEL': 'info',
+            },
+            re.compile(r'^teamspeak_exporter_poll_success 1\.0', re.M),
+            argv=('--ts3port', 'nope', '--loglevel', 'chatty'),
+        )
+
+    assert 'Ignoring --ts3port (TEAMSPEAK_PORT is set)' in output
+    assert 'Ignoring --loglevel (LOG_LEVEL is set)' in output
+    assert PASSWORD not in output

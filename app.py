@@ -12,11 +12,12 @@ import logging
 import os
 import re
 import socket
+import sys
 import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 from prometheus_client import (
     REGISTRY,
@@ -368,50 +369,96 @@ class Config:
     log_level: str = DEFAULT_LOG_LEVEL
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse flags. Unset flags stay ``None`` so env precedence can be traced."""
+class _ArgumentParser(argparse.ArgumentParser):
+    """An ``ArgumentParser`` whose error messages never repeat a value.
 
-    parser = argparse.ArgumentParser()
+    argparse quotes command-line fragments in its errors -- ``unrecognized
+    arguments: --ts3pasword <password>`` after a typo, ``ambiguous option:
+    --ts3=<password>`` -- and prints them to stderr, where no logging filter
+    sees them. Every value-like fragment of the command line (anything not
+    starting with ``-``, and anything after ``=``) is replaced by ``…`` before
+    the message is printed.
+    """
+
+    _argv: list[str] = []
+
+    def parse_known_args(self, args=None, namespace=None):  # type: ignore[override]
+        self._argv = list(sys.argv[1:] if args is None else args)
+        return super().parse_known_args(args, namespace)
+
+    def error(self, message: str) -> NoReturn:
+        super().error(_mask_values(message, self._argv))
+
+
+def _mask_values(message: str, argv: list[str]) -> str:
+    fragments = set()
+    for token in argv:
+        if token.startswith('-'):
+            _, separator, value = token.partition('=')
+            if separator and value:
+                fragments.add(value)
+        elif token:
+            fragments.add(token)
+    for fragment in sorted(fragments, key=len, reverse=True):
+        # Whole fragments only: a value "3" must not mangle "--ts3port".
+        pattern = r'(?<![^\s\'"=])' + re.escape(fragment) + r'(?![^\s\'"])'
+        message = re.sub(pattern, '…', message)
+    return message
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse flags as plain strings.
+
+    Nothing is converted or validated here: environment variables take
+    precedence over flags, so a flag is checked only if it is actually used --
+    by ``resolve_config``, with the same parser as the environment variable.
+    Unset flags stay ``None`` so that precedence can be traced.
+    """
+
+    parser = _ArgumentParser()
     parser.add_argument(
         '--ts3host',
         help=f'Hostname or ip address of TS3 server (default: {DEFAULT_TS3_HOST})',
-        type=str,
     )
     parser.add_argument(
         '--ts3port',
         help=f'Port of TS3 server (default: {DEFAULT_TS3_PORT})',
-        type=int,
     )
     parser.add_argument(
         '--ts3username',
         help=f'ServerQuery username of TS3 server (default: {DEFAULT_TS3_USERNAME})',
-        type=str,
     )
     parser.add_argument(
         '--ts3password',
         help='ServerQuery password of TS3 server. Prefer TEAMSPEAK_PASSWORD: '
         'flags are visible in the process list',
-        type=str,
     )
     parser.add_argument(
         '--metricsport',
         help='Port on which this service exposes the metrics '
         f'(default: {DEFAULT_METRICS_PORT})',
-        type=int,
     )
     parser.add_argument(
         '--pollinterval',
-        help='Seconds between two polls of the TS3 server '
+        help='Seconds between two polls of the TS3 server, at most '
+        f'{MAX_POLL_INTERVAL_IN_SECONDS:g} '
         f'(default: {DEFAULT_POLL_INTERVAL_IN_SECONDS:g})',
-        type=float,
     )
     parser.add_argument(
         '--loglevel',
-        help=f'Log level (default: {DEFAULT_LOG_LEVEL})',
-        type=str.upper,
-        choices=LOG_LEVELS,
+        help=f'Log level: {", ".join(LOG_LEVELS)} (default: {DEFAULT_LOG_LEVEL})',
     )
     return parser.parse_args(argv)
+
+
+def password_candidates(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
+    """Every password given, used or not: an overridden one is a secret too."""
+
+    return [
+        value
+        for value in (getattr(args, 'ts3password', None), env.get('TEAMSPEAK_PASSWORD'))
+        if value
+    ]
 
 
 def resolve_config(args: argparse.Namespace, env: Mapping[str, str]) -> Config:
@@ -425,7 +472,7 @@ def resolve_config(args: argparse.Namespace, env: Mapping[str, str]) -> Config:
     for dest, variable, default, field, parse in _OPTIONS:
         flag = getattr(args, dest, None)
         raw = env.get(variable, default if flag is None else flag)
-        values[field] = parse(variable, raw)
+        values[field] = parse(f'{variable} (--{dest})', raw)
     return Config(**values)  # type: ignore[arg-type]
 
 
@@ -852,14 +899,20 @@ def configure_logging(level: str, secrets: list[str] | None = None) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_logging(DEFAULT_LOG_LEVEL)
+    # Redaction first: configuration errors quote the offending value, which
+    # can equal the password. Every password given counts, used or not.
+    configure_logging(
+        DEFAULT_LOG_LEVEL, secrets=password_candidates(argparse.Namespace(), os.environ)
+    )
     args = parse_args(argv)
+    secrets = password_candidates(args, os.environ)
+    configure_logging(DEFAULT_LOG_LEVEL, secrets=secrets)
     try:
         config = resolve_config(args, os.environ)
     except ExporterError as err:
         log.error('Invalid configuration: %s', err)
         return 2
-    configure_logging(config.log_level, secrets=[config.password])
+    configure_logging(config.log_level, secrets=secrets)
     for flag in overridden_flags(args, os.environ):
         log.warning('Ignoring %s: environment variables take precedence', flag)
     log.info(describe_settings(config))

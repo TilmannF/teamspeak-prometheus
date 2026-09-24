@@ -25,7 +25,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
   `teamspeak_exporter_poll_errors_total{reason}`,
   `teamspeak_exporter_missing_fields{virtualserver_name}`,
   `teamspeak_exporter_build_info{version}`.
-- A warning at startup for every flag an environment variable overrides.
+- A warning at startup for every flag an environment variable overrides. An
+  overridden flag is not validated, so a malformed one no longer stops the
+  exporter.
 - Container `HEALTHCHECK` that probes `/metrics` on the port the exporter
   actually uses (`METRICS_PORT` or `--metricsport`), never through a proxy
   from the environment, and deliberately does not depend on TeamSpeak being
@@ -53,6 +55,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
   ServerQuery errors: it logs, counts the error, and retries with backoff
   (doubling, capped at 60 seconds or the poll interval if that is longer).
 - The poll interval is measured start to start.
+- Command-line errors never repeat a value (a mistyped `--ts3pasword <password>`
+  is reported as `--ts3pasword …`), and configuration errors are censored like
+  every other log line.
 - Text from the TeamSpeak server is treated as untrusted in logs: the password
   is censored from every log line, tracebacks included, and control
   characters are escaped so server text cannot forge log lines.

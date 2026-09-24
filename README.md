@@ -87,6 +87,9 @@ List all arguments with `python app.py -h`.
 | `--pollinterval` | Seconds between two polls of the TS3 server, at most 86400 | *5* |
 | `--loglevel` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
+Flags are only checked when they are used: a malformed flag that an
+environment variable overrides is ignored with a warning.
+
 **Prefer `TEAMSPEAK_PASSWORD` over `--ts3password`.** A command-line argument
 is visible to anything that can read the process list (`ps`, `/proc/<pid>/cmdline`);
 the environment variable is not on the command line, though it is still
