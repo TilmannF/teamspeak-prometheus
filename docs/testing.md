@@ -11,8 +11,9 @@ make docker-test  # build the image, test HEALTHCHECK and shutdown (needs Docker
 ```
 
 `make run-fake` starts a fake TeamSpeak ServerQuery interface and the real
-exporter against it, then prints the `curl` command to scrape. It listens on
-the usual port 8000; pass extra flags through `RUN_FAKE_ARGS`:
+exporter against it, then prints the `curl` command to scrape. Both listen on
+127.0.0.1 only — a local test tool has no business on the network — with the
+metrics on the usual port 8000; pass extra flags through `RUN_FAKE_ARGS`:
 
 ```bash
 make run-fake RUN_FAKE_ARGS="--metricsport 8231"

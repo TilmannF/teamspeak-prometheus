@@ -51,7 +51,8 @@ def run(
     gauges = app.build_gauges(registry)
     exporter_metrics = app.build_exporter_metrics(registry)
     try:
-        start_http_server(config.metrics_port, registry=registry)
+        # Loopback only: a local test tool has no business on the network.
+        start_http_server(config.metrics_port, addr='127.0.0.1', registry=registry)
     except OSError as err:
         raise SystemExit(
             app.redact(

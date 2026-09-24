@@ -501,10 +501,10 @@ def test_the_harness_never_prints_a_password_equal_to_its_metrics_port():
 
 
 def test_the_harness_never_prints_its_password_when_the_port_is_taken():
-    # all interfaces, like the exporter's metrics server, so the port is taken
-    # for it too (a 127.0.0.1 bind would not collide with a 0.0.0.0 one)
+    # the harness serves on loopback only, so taking the loopback port is
+    # enough -- and binds no socket to all interfaces
     with socket.socket() as taken:
-        taken.bind(('', 0))
+        taken.bind(('127.0.0.1', 0))
         taken.listen()
         port = str(taken.getsockname()[1])
 
@@ -700,3 +700,28 @@ def test_an_overridden_flag_password_is_censored_in_the_metrics():
 
     assert old not in body
     assert old not in output
+
+
+def non_loopback_address() -> str | None:
+    """An address of this machine other than 127.0.0.1, if it has one."""
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(('192.0.2.1', 9))  # TEST-NET-1; nothing is sent
+        except OSError:
+            return None
+        address = probe.getsockname()[0]
+    return None if address.startswith('127.') else address
+
+
+def test_the_harness_serves_metrics_on_loopback_only(exporter):
+    # The harness is a local test tool: its metrics must not be reachable from
+    # the network (CodeQL py/bind-socket-all-network-interfaces).
+    _, port = exporter
+    scrape(port, names())
+    address = non_loopback_address()
+    if address is None:
+        pytest.skip('this machine has no non-loopback IPv4 address')
+
+    with pytest.raises(requests.ConnectionError):
+        HTTP.get(f'http://{address}:{port}/metrics', timeout=2)
