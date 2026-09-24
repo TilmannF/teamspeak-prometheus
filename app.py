@@ -127,7 +127,7 @@ class ServerQueryError(ExporterError):
 
 
 class LoginFailed(ServerQueryError):
-    """The ServerQuery login was rejected."""
+    """TeamSpeak rejected the ServerQuery credentials (error id 520)."""
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +135,7 @@ class LoginFailed(ServerQueryError):
 # ---------------------------------------------------------------------------
 
 LINE_TERMINATOR = b'\n\r'
+INVALID_LOGIN_ERROR_ID = 520  # "invalid loginname or password"
 FLOOD_ERROR_ID = 524
 
 _ESCAPES = [
@@ -245,6 +246,10 @@ class ServerQueryClient:
             raise
 
     def login(self, username: str, password: str) -> None:
+        """Log in. Only a credential rejection raises ``LoginFailed``; any other
+        error -- flooding past the retry budget, a ban, a missing permission --
+        stays a ``ServerQueryError``, so it is not reported as a bad password."""
+
         try:
             self.command(
                 'login',
@@ -252,6 +257,8 @@ class ServerQueryClient:
                 client_login_password=password,
             )
         except ServerQueryError as err:
+            if err.error_id != INVALID_LOGIN_ERROR_ID:
+                raise
             raise LoginFailed(err.command, err.error_id, err.message) from None
 
     def serverlist(self) -> list[dict[str, str | None]]:
@@ -730,7 +737,7 @@ class Teamspeak3MetricService:
             if (name, field) not in self._warned_missing:
                 self._warned_missing.add((name, field))
                 log.warning(
-                    'Virtualserver %r: serverinfo field %s missing or not numeric; '
+                    "Virtualserver '%s': serverinfo field %s missing or not numeric; "
                     'not exporting it',
                     name,
                     field,
@@ -740,7 +747,7 @@ class Teamspeak3MetricService:
         """Drop every series of virtualservers that no longer exist."""
 
         for name in virtualservers:
-            log.info('Virtualserver %r is gone; removing its series', name)
+            log.info("Virtualserver '%s' is gone; removing its series", name)
             for gauge in self.gauges.values():
                 _remove_series(gauge, name)
             _remove_series(self.exporter_metrics.missing_fields, name)
@@ -781,10 +788,67 @@ def poll_forever(
         sleep(max(next_delay(interval_in_seconds, failures) - (clock() - started), 0))
 
 
-def configure_logging(level: str) -> None:
+REDACTED = '*censored*'
+# C0 and C1 control characters, DEL, and the Unicode line and paragraph
+# separators some log viewers break lines on. Tab stays readable.
+_CONTROL_CHARACTERS = re.compile(r'[\x00-\x08\x0a-\x1f\x7f-\x9f\u2028\u2029]')
+
+
+class RedactingFilter(logging.Filter):
+    """Keeps secrets and forged lines out of the exporter's log.
+
+    Text from the TeamSpeak server -- error messages, virtualserver names --
+    reaches the log as arguments of a log call and is untrusted: a hostile or
+    compromised server could echo the password it was just sent, or embed line
+    breaks to fake log lines. On every record this filter
+
+    * replaces each secret with ``*censored*``: in the message, in its
+      arguments, and in a traceback;
+    * escapes control characters in string arguments, so one call is always one
+      log line. The message template itself is the exporter's own text and may
+      span lines (the settings banner does).
+
+    Numbers pass through untouched so ``%d``/``%f`` formats keep working.
+    """
+
+    def __init__(self, secrets: list[str]) -> None:
+        super().__init__()
+        # Longest first, so a secret containing another is replaced whole.
+        self.secrets = sorted({s for s in secrets if s}, key=len, reverse=True)
+
+    def redact(self, text: str) -> str:
+        for secret in self.secrets:
+            text = text.replace(secret, REDACTED)
+        return text
+
+    def clean(self, value: object) -> object:
+        if isinstance(value, (int, float)):
+            return value
+        text = self.redact(str(value))
+        return _CONTROL_CHARACTERS.sub(lambda match: repr(match.group())[1:-1], text)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = self.redact(str(record.msg))
+        if isinstance(record.args, Mapping):
+            record.args = {key: self.clean(v) for key, v in record.args.items()}
+        elif record.args:
+            record.args = tuple(self.clean(arg) for arg in record.args)
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = self.redact(record.exc_text)
+        return True
+
+
+def configure_logging(level: str, secrets: list[str] | None = None) -> None:
+    """Set up logging; ``secrets`` are redacted from every exporter log line."""
+
     logging.basicConfig(
         level=level, format='%(asctime)s %(levelname)s %(message)s', force=True
     )
+    for existing in [f for f in log.filters if isinstance(f, RedactingFilter)]:
+        log.removeFilter(existing)
+    log.addFilter(RedactingFilter(secrets or []))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -795,7 +859,7 @@ def main(argv: list[str] | None = None) -> int:
     except ExporterError as err:
         log.error('Invalid configuration: %s', err)
         return 2
-    configure_logging(config.log_level)
+    configure_logging(config.log_level, secrets=[config.password])
     for flag in overridden_flags(args, os.environ):
         log.warning('Ignoring %s: environment variables take precedence', flag)
     log.info(describe_settings(config))

@@ -53,6 +53,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
   ServerQuery errors: it logs, counts the error, and retries with backoff
   (doubling, capped at 60 seconds or the poll interval if that is longer).
 - The poll interval is measured start to start.
+- Text from the TeamSpeak server is treated as untrusted in logs: the password
+  is censored from every log line, tracebacks included, and control
+  characters are escaped so server text cannot forge log lines.
 
 ### Fixed
 

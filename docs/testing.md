@@ -26,15 +26,16 @@ make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 | --- | --- |
 | `tests/fixtures/ts3-3.13.8-*.bin` | Raw bytes captured from a real TeamSpeak 3.13.8 server |
 | `tests/serverquery.py` | Independent reference encoder: escaping, framing, records |
-| `tests/fake_ts3_server.py` | Threaded TCP ServerQuery stub: N virtualservers, flood protection |
+| `tests/fake_ts3_server.py` | Threaded TCP ServerQuery stub: N virtualservers, flood protection, hostile mode |
 | `tests/exporter_harness.py` | Runs the real exporter against the fake server |
 | `tests/fakes.py` | In-process fake client and scripted connection — no sockets |
 | `tests/test_serverquery.py` | Reference encoder round-trips |
 | `tests/test_client.py` | `ServerQueryClient` against scripted bytes and the real captures |
+| `tests/test_logging.py` | `RedactingFilter`: password censoring, forged-line escaping, a hostile server |
 | `tests/test_config.py` | Defaults, environment precedence, validation, override warnings |
 | `tests/test_metrics.py` | The metric contract: names, prefix, label, values, self-metrics |
 | `tests/test_service.py` | Poll sequence, error survival, series lifecycle, backoff |
-| `tests/test_smoke.py` | Subprocess boot → scrape `/metrics`, flood and outage survival, healthcheck probe |
+| `tests/test_smoke.py` | Subprocess boot → scrape `/metrics`, flood and outage survival, healthcheck probe, `python app.py` against a hostile server |
 | `tests/test_healthcheck.py` | `healthcheck.py` against a fake `/proc`: finding the exporter, port resolution, no secret leaks |
 | `tests/container_healthcheck.sh` | The built image's `HEALTHCHECK` in every port configuration, via `make docker-healthcheck` |
 
@@ -58,7 +59,9 @@ The production client is tested against three independent things:
   of the escaping rules; the fake server uses it and the client tests compare
   against it.
 * **The fake server.** Two-line banner, `\n\r` framing, error trailers and
-  TeamSpeak-style flood protection, over real TCP.
+  TeamSpeak-style flood protection, over real TCP. With `hostile=True` it
+  echoes the password and embeds forged log lines in its error text, to prove
+  neither reaches the log.
 
 To refresh the captures, run the official image and record the raw responses:
 

@@ -95,7 +95,7 @@ The exporter's own health. Part of the same stability contract.
 | `teamspeak_exporter_last_successful_poll_timestamp_seconds` | gauge | | Unix time the last fully successful poll started; 0 until one succeeds |
 | `teamspeak_exporter_poll_success` | gauge | | 1 if the last poll read every virtualserver without error, else 0 |
 | `teamspeak_exporter_poll_duration_seconds` | gauge | | Duration of the last poll |
-| `teamspeak_exporter_poll_errors_total` | counter | `reason` | Failed polls or poll steps: `connection`, `login`, `query`, `unexpected` |
+| `teamspeak_exporter_poll_errors_total` | counter | `reason` | Failed polls or poll steps: `connection` (unreachable, dropped, banned IP), `login` (credentials rejected), `query` (any other ServerQuery error), `unexpected` |
 | `teamspeak_exporter_missing_fields` | gauge | `virtualserver_name` | Contract fields missing or not numeric in the last `serverinfo` |
 | `teamspeak_exporter_build_info` | gauge (info) | `version` | Always 1 |
 

@@ -99,6 +99,15 @@ def test_a_rejected_login_is_counted_and_closes_the_connection():
     assert setup.client.closed
 
 
+def test_a_login_error_other_than_rejection_counts_as_a_query_error():
+    setup = Setup(login_error=app.ServerQueryError('login', 524, 'client is flooding'))
+
+    assert setup.service.poll() is app.PollResult.FAILED
+
+    assert setup.value('teamspeak_exporter_poll_errors_total', reason='query') == 1
+    assert setup.value('teamspeak_exporter_poll_errors_total', reason='login') == 0
+
+
 def test_a_failed_serverlist_fails_the_poll():
     setup = Setup(serverlist_error='database empty result set')
 

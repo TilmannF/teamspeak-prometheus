@@ -22,7 +22,11 @@ from tests.serverquery import (
     decode_pairs,
     encode_pairs,
     encode_records,
+    escape,
 )
+
+# What a hostile server appends to its error messages: a forged log line.
+FORGED_LOG_LINE = '2026-01-01 00:00:00,000 CRITICAL forged by the server'
 
 DEFAULT_NAMES = ['Test Server', 'Zweiter Server']
 
@@ -100,8 +104,11 @@ class _Handler(socketserver.StreamRequestHandler):
                 self._ok()
                 return
             if command == 'login':
-                if keys.get('client_login_password') == self.server.password:
+                submitted = keys.get('client_login_password') or ''
+                if submitted == self.server.password:
                     self._ok()
+                elif self.server.hostile:
+                    self._error(520, f'invalid password {submitted}\n{FORGED_LOG_LINE}')
                 else:
                     self._error(520, 'invalid loginname or password')
                 continue
@@ -112,6 +119,14 @@ class _Handler(socketserver.StreamRequestHandler):
                 selected = self._find(keys.get('sid'))
                 if selected is None:
                     self._error(1024, 'invalid serverID')
+                elif self.server.hostile and selected['virtualserver_id'] == 2:
+                    # echoes the password it was sent at login
+                    self._error(
+                        1033,
+                        f'server is not running {self.server.password}\n'
+                        f'{FORGED_LOG_LINE}',
+                    )
+                    selected = None
                 else:
                     self._ok()
                 continue
@@ -140,9 +155,9 @@ class _Handler(socketserver.StreamRequestHandler):
         self._write('error id=0 msg=ok')
 
     def _error(self, code: int, message: str, extra: str | None = None) -> None:
-        line = f'error id={code} msg={_escape_spaces(message)}'
+        line = f'error id={code} msg={escape(message)}'
         if extra:
-            line += f' extra_msg={_escape_spaces(extra)}'
+            line += f' extra_msg={escape(extra)}'
         self._write(line)
 
     def _data(self, payload: str) -> None:
@@ -150,14 +165,11 @@ class _Handler(socketserver.StreamRequestHandler):
         self._ok()
 
 
-def _escape_spaces(text: str) -> str:
-    return text.replace(' ', '\\s')
-
-
 class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
     password = ''
+    hostile = False
     virtualservers: list[dict[str, object]] = VIRTUALSERVERS
     flood = _FloodGuard(None, 3.0)
 
@@ -168,6 +180,10 @@ class FakeTs3Server:
     ``flood_limit`` enables TeamSpeak-style flood protection: at most that
     many commands per ``flood_window`` seconds, shared by all connections --
     TeamSpeak counts per client IP, and every test client is 127.0.0.1.
+
+    ``hostile`` makes it behave like a compromised server: a rejected login and
+    ``use`` of virtualserver 2 answer with error text that echoes the password
+    and embeds a line break followed by ``FORGED_LOG_LINE``.
     """
 
     def __init__(
@@ -178,11 +194,13 @@ class FakeTs3Server:
         virtualserver_count: int = 2,
         flood_limit: int | None = None,
         flood_window: float = 3.0,
+        hostile: bool = False,
     ):
         self._server = _Server((host, port), _Handler)
         self._server.password = password
         self._server.virtualservers = virtualservers(virtualserver_count)
         self._server.flood = _FloodGuard(flood_limit, flood_window)
+        self._server.hostile = hostile
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property

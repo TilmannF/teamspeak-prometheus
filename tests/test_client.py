@@ -67,6 +67,33 @@ def test_a_rejected_login_raises_login_failed_without_the_password():
     assert 'hunter2' not in str(caught.value)
 
 
+def test_a_login_still_flooded_after_all_retries_is_not_a_rejected_login():
+    flood = flood_error(1)
+    query, _ = client(*[flood] * (app.FLOOD_RETRIES + 1))
+
+    with pytest.raises(app.ServerQueryError) as caught:
+        query.login('serveradmin', 'hunter2')
+
+    assert not isinstance(caught.value, app.LoginFailed)
+    assert caught.value.error_id == 524
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        b'error id=3329 msg=connection\\sfailed,\\syou\\sare\\sbanned\n\r',
+        b'error id=2568 msg=insufficient\\sclient\\spermissions\n\r',
+    ],
+)
+def test_other_login_errors_are_not_rejected_logins(error: bytes):
+    query, _ = client(error)
+
+    with pytest.raises(app.ServerQueryError) as caught:
+        query.login('serveradmin', 'hunter2')
+
+    assert not isinstance(caught.value, app.LoginFailed)
+
+
 def test_the_real_serverlist_response_is_parsed():
     query, _ = client((FIXTURES / 'ts3-3.13.8-serverlist.bin').read_bytes())
 

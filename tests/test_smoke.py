@@ -6,6 +6,7 @@ and opens sockets.
 
 from __future__ import annotations
 
+import os
 import re
 import socket
 import subprocess
@@ -17,7 +18,7 @@ import requests
 
 import app
 import healthcheck
-from tests.fake_ts3_server import FakeTs3Server, virtualservers
+from tests.fake_ts3_server import FORGED_LOG_LINE, FakeTs3Server, virtualservers
 
 pytestmark = pytest.mark.smoke
 
@@ -220,3 +221,65 @@ def test_the_healthcheck_probe_ignores_a_proxy_in_the_environment(
     monkeypatch.setenv(variable, f'http://127.0.0.1:{free_port()}')
 
     healthcheck.probe(port)
+
+
+def run_app(env: dict[str, str], until: re.Pattern[str]) -> str:
+    """Run the real entry point, ``python app.py``, until ``until`` shows up in
+    a scrape; return everything it logged."""
+
+    port = free_port()
+    process = subprocess.Popen(
+        [sys.executable, '-u', 'app.py'],
+        env={
+            'PATH': os.environ.get('PATH', ''),
+            'METRICS_PORT': str(port),
+            'TEAMSPEAK_POLL_INTERVAL': '0.2',
+            **env,
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                if until.search(
+                    HTTP.get(f'http://127.0.0.1:{port}/metrics', timeout=2).text
+                ):
+                    break
+            except requests.RequestException:
+                pass
+            time.sleep(0.2)
+        else:
+            raise AssertionError(f'never saw {until.pattern}')
+    finally:
+        output = stop(process)
+    return output
+
+
+@pytest.mark.parametrize(
+    ('submitted', 'reason', 'redacted'),
+    [
+        (PASSWORD, 'query', 'server is not running *censored*\\n'),
+        ('wrong-' + PASSWORD, 'login', 'invalid password *censored*\\n'),
+    ],
+    ids=['echo-on-failing-virtualserver', 'echo-on-rejected-login'],
+)
+def test_a_hostile_server_cannot_put_the_password_or_forged_lines_in_the_log(
+    submitted, reason, redacted
+):
+    with FakeTs3Server(password=PASSWORD, hostile=True) as server:
+        output = run_app(
+            {
+                'TEAMSPEAK_HOST': server.host,
+                'TEAMSPEAK_PORT': str(server.port),
+                'TEAMSPEAK_PASSWORD': submitted,
+            },
+            re.compile(rf'poll_errors_total{{reason="{reason}"}} [1-9]'),
+        )
+
+    assert submitted not in output
+    # the server's text is logged -- censored, and on the same line, escaped
+    assert redacted + FORGED_LOG_LINE in output
+    assert not any(line.startswith(FORGED_LOG_LINE) for line in output.splitlines())

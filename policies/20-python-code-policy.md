@@ -87,6 +87,8 @@ Production code MUST use `logging`, not `print`. Pass values as logging argument
 
 Neither `print` nor `logging` may ever emit the ServerQuery password. Error messages MUST name a failed command, never its parameters: `login` carries the password. The existing censoring in the settings banner MUST be preserved.
 
+Values from the TeamSpeak server MUST be passed as logging arguments, never formatted into the message template: the `RedactingFilter` redacts the password everywhere, but escapes control characters only in arguments. Log calls SHOULD use `%s`, not `%r`, for server text; the filter has already escaped it.
+
 ## 9. Tests
 
 Tests live in `tests/` and use `pytest`.

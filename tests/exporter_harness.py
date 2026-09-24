@@ -42,7 +42,7 @@ def run(
         ),
         env={},
     )
-    app.configure_logging(config.log_level)
+    app.configure_logging(config.log_level, secrets=[config.password])
     app.log.info(app.describe_settings(config))
 
     registry = CollectorRegistry()

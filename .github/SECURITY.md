@@ -30,6 +30,11 @@ HTTP endpoint. The things worth reporting:
 - **Raw ServerQuery is unencrypted.** The password travels in cleartext
   between exporter and TeamSpeak, as with every raw ServerQuery client. Run the
   exporter on the same host or a private network.
+- **The TeamSpeak server is trusted with the password**, necessarily: it is
+  sent there to log in. What a hostile server answers is treated as untrusted
+  — the password is censored from every log line and control characters are
+  escaped, so server text can neither leak the password into logs nor forge
+  log lines.
 
 ## Not in scope
 

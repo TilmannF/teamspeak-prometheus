@@ -53,8 +53,11 @@ Three properties make this testable, and all three are required by
 `ServerQueryClient` speaks the raw TeamSpeak 3 ServerQuery protocol (TCP 10011)
 with the standard library only. It sends one command at a time and reads until
 the `error id=... msg=...` trailer; `notify*` lines are skipped. A non-zero id
-raises `ServerQueryError`, or `LoginFailed` for `login`. Error messages name the
-command, never its parameters.
+raises `ServerQueryError`. Only a credential rejection on `login` — error 520,
+"invalid loginname or password" — raises `LoginFailed`; a login that fails for
+any other reason (still flooding after all retries, a ban, a missing
+permission) stays a `ServerQueryError`, so it is not reported as a bad
+password. Error messages name the command, never its parameters.
 
 TeamSpeak throttles query clients whose IP is not in `query_ip_allowlist.txt`
 (default: 10 commands per 3 seconds) and answers `error id=524 ... please wait
@@ -73,7 +76,8 @@ bind. Everything else is logged, counted, and retried:
 | Situation | Behavior | Counted as |
 | --- | --- | --- |
 | Connection refused, dropped, timed out, IP banned | poll fails, backoff | `reason="connection"` |
-| Login rejected | poll fails, backoff | `reason="login"` |
+| Login rejected: wrong credentials (error 520) | poll fails, backoff | `reason="login"` |
+| Login fails otherwise (flooding, ban, permission) | poll fails, backoff | `reason="query"` |
 | `serverlist` returns an error | poll fails, backoff | `reason="query"` |
 | One virtualserver fails (`use`/`serverinfo` error, e.g. stopped) | skipped, others still read, poll partial | `reason="query"` |
 | `error id=524` flooding | wait and retry, up to 3 times | `reason="query"` if still failing |
@@ -86,6 +90,25 @@ A poll that **fails** keeps every existing series at its last value and sets
 data. Backoff doubles the wait per consecutive failed poll, capped at
 `max(60s, poll interval)`, and resets on the next poll that reaches the server.
 A **partial** poll does not back off.
+
+## Logging untrusted text
+
+Error messages and virtualserver names come from the TeamSpeak server and are
+logged as arguments of log calls. They are untrusted: a hostile or compromised
+server could echo the password it was just sent, or embed line breaks to forge
+log lines. `main()` installs a `RedactingFilter` on the exporter's logger,
+which on every record
+
+* replaces the configured password with `*censored*` — in the message, its
+  arguments, and any traceback;
+* escapes control characters (line breaks, terminal escapes, C1 codes, Unicode
+  line separators) in string arguments, so one log call is always one line.
+
+The message templates are the exporter's own text and are left as they are; the
+multi-line settings banner stays readable. Numbers pass through untouched.
+
+A very short password is replaced wherever it appears, also inside unrelated
+text. That over-censors, but never leaks.
 
 ## Series lifecycle
 

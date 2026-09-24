@@ -27,9 +27,12 @@ class FakeTs3Client:
         ]
     )
     login_succeeds: bool = True
+    # a ServerQueryError the login raises instead, e.g. flooding
+    login_error: ServerQueryError | None = None
     serverlist_error: str | None = None
     # virtualserver ids whose ``use`` fails, e.g. because they are stopped
     offline: set[int] = field(default_factory=set)
+    offline_message: str = 'server is not running'
     # field names left out of every serverinfo payload
     missing: set[str] = field(default_factory=set)
     calls: list[tuple[str, object]] = field(default_factory=list)
@@ -38,6 +41,8 @@ class FakeTs3Client:
 
     def login(self, username: str, password: str) -> None:
         self.calls.append(('login', username))
+        if self.login_error is not None:
+            raise self.login_error
         if not self.login_succeeds:
             raise LoginFailed('login', 520, 'invalid loginname or password')
 
@@ -50,7 +55,7 @@ class FakeTs3Client:
     def use(self, virtualserver_id: object) -> None:
         self.calls.append(('use', virtualserver_id))
         if virtualserver_id in self.offline:
-            raise ServerQueryError('use', 1033, 'server is not running')
+            raise ServerQueryError('use', 1033, self.offline_message)
         self._selected = virtualserver_id
 
     def serverinfo(self) -> dict[str, object]:
