@@ -46,6 +46,13 @@ LOG_LEVELS = ('DEBUG', 'INFO', 'WARNING', 'ERROR')
 # Socket timeout for every ServerQuery read and write. Without one, a server
 # that stops answering mid-poll would stall the exporter forever.
 SERVERQUERY_TIMEOUT_IN_SECONDS = 10.0
+# Deadline for one whole ServerQuery session. The socket timeout alone does not
+# bound a poll: a server trickling a byte at a time, or sending notifications
+# without end, never lets a single read time out.
+POLL_TIMEOUT_IN_SECONDS = 60.0
+# Longest response line accepted. A real serverinfo line is about 4 KiB and a
+# serverlist line about 300 bytes per virtualserver.
+MAX_LINE_BYTES = 1024 * 1024
 # After this many consecutive failed polls the wait between attempts stops
 # growing. Never shorter than the configured interval.
 MAX_BACKOFF_IN_SECONDS = 60.0
@@ -216,10 +223,17 @@ class ServerQueryClient:
     """
 
     def __init__(
-        self, connection: Connection, sleep: Callable[[float], None] = time.sleep
+        self,
+        connection: Connection,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        timeout: float = POLL_TIMEOUT_IN_SECONDS,
     ) -> None:
         self._connection = connection
         self._sleep = sleep
+        self._clock = clock
+        self._timeout = timeout
+        self._deadline = clock() + timeout
         self._buffer = b''
         # The server greets with two lines: ``TS3`` and a welcome text. A server
         # that has banned this IP (flooding, failed logins) or reached its
@@ -237,11 +251,13 @@ class ServerQueryClient:
 
     @classmethod
     def connect(
-        cls, host: str, port: int, timeout: float = SERVERQUERY_TIMEOUT_IN_SECONDS
+        cls, host: str, port: int, session_timeout: float = POLL_TIMEOUT_IN_SECONDS
     ) -> ServerQueryClient:
-        connection = socket.create_connection((host, port), timeout=timeout)
+        connection = socket.create_connection(
+            (host, port), timeout=SERVERQUERY_TIMEOUT_IN_SECONDS
+        )
         try:
-            return cls(connection)
+            return cls(connection, timeout=session_timeout)
         except BaseException:
             connection.close()
             raise
@@ -286,11 +302,13 @@ class ServerQueryClient:
         for attempt in range(FLOOD_RETRIES + 1):
             self._send(command, params)
             records, error = self._read_response()
-            error_id = int(error.get('id') or 0)
+            error_id = _error_id(command, error)
             if error_id == 0:
                 return records
             if error_id == FLOOD_ERROR_ID and attempt < FLOOD_RETRIES:
                 wait = _flood_wait(error.get('extra_msg'))
+                if self._clock() + wait >= self._deadline:
+                    raise self._timed_out()
                 log.debug('ServerQuery flood protection: waiting %.0fs', wait)
                 self._sleep(wait)
                 continue
@@ -316,12 +334,44 @@ class ServerQueryClient:
 
     def _read_line(self) -> str:
         while LINE_TERMINATOR not in self._buffer:
+            if len(self._buffer) > MAX_LINE_BYTES:
+                raise ConnectionError(
+                    f'ServerQuery sent a line longer than {MAX_LINE_BYTES} bytes'
+                )
+            remaining = self._deadline - self._clock()
+            if remaining <= 0:
+                raise self._timed_out()
+            # Never wait on one read past the session deadline.
+            settimeout = getattr(self._connection, 'settimeout', None)
+            if settimeout is not None:
+                settimeout(min(remaining, SERVERQUERY_TIMEOUT_IN_SECONDS))
             chunk = self._connection.recv(4096)
             if not chunk:
                 raise ConnectionError('ServerQuery closed the connection')
             self._buffer += chunk
         line, _, self._buffer = self._buffer.partition(LINE_TERMINATOR)
         return line.decode('utf-8', errors='replace')
+
+    def _timed_out(self) -> TimeoutError:
+        return TimeoutError(
+            f'ServerQuery session did not finish within {self._timeout:g}s'
+        )
+
+
+def _error_id(command: str, error: Mapping[str, str | None]) -> int:
+    """The numeric id of an ``error`` trailer.
+
+    A trailer without one is a protocol violation, not success: treating it as
+    id 0 would turn a garbled ``serverlist`` into "no virtualservers" and drop
+    every series.
+    """
+
+    try:
+        return int(error.get('id') or '')
+    except ValueError:
+        raise ServerQueryError(
+            command, -1, 'malformed response: error line without a numeric id'
+        ) from None
 
 
 def _flood_wait(extra_message: str | None) -> float:
@@ -709,6 +759,8 @@ class Teamspeak3MetricService:
         self.clock = clock
         self.known_virtualservers: set[str] = set()
         self._warned_missing: set[tuple[str, str]] = set()
+        # virtualserver id -> status, for those serverlist reports not online
+        self._not_online: dict[str, str] = {}
 
     def poll(self) -> PollResult:
         metrics = self.exporter_metrics
@@ -752,8 +804,15 @@ class Teamspeak3MetricService:
             servers = client.serverlist()
             result = PollResult.OK
             seen: set[str] = set()
+            not_online: dict[str, str] = {}
             for server in servers:
                 virtualserver_id = server.get('virtualserver_id')
+                status = server.get('virtualserver_status')
+                if status not in (None, 'online'):
+                    # Stopped (or booting, deploying, ...) is a state of the
+                    # host, not an error of the exporter: skip it silently.
+                    not_online[str(virtualserver_id)] = str(status)
+                    continue
                 try:
                     client.use(virtualserver_id)
                     serverinfo = client.serverinfo()
@@ -769,11 +828,38 @@ class Teamspeak3MetricService:
                 )
                 self._record(name, serverinfo)
                 seen.add(name)
+            self._report_status_changes(not_online, servers)
             self._forget(self.known_virtualservers - seen)
             self.known_virtualservers = seen
             return result
         finally:
             client.close()
+
+    def _report_status_changes(
+        self, not_online: dict[str, str], servers: list[dict[str, str | None]]
+    ) -> None:
+        """Log once when a virtualserver stops or starts being online."""
+
+        names = {
+            str(server.get('virtualserver_id')): server.get(VIRTUALSERVER_LABEL)
+            for server in servers
+        }
+        for virtualserver_id, status in not_online.items():
+            if self._not_online.get(virtualserver_id) != status:
+                log.info(
+                    "Virtualserver %s '%s' is %s; not exporting it",
+                    virtualserver_id,
+                    names.get(virtualserver_id),
+                    status,
+                )
+        for virtualserver_id in self._not_online.keys() - not_online.keys():
+            if virtualserver_id in names:
+                log.info(
+                    "Virtualserver %s '%s' is online again",
+                    virtualserver_id,
+                    names[virtualserver_id],
+                )
+        self._not_online = not_online
 
     def _record(self, name: str, serverinfo: Mapping[str, object]) -> None:
         skipped = update_gauges(self.gauges, name, serverinfo)
@@ -791,10 +877,11 @@ class Teamspeak3MetricService:
                 )
 
     def _forget(self, virtualservers: set[str]) -> None:
-        """Drop every series of virtualservers that no longer exist."""
+        """Drop every series of virtualservers no longer read: deleted, not
+        online, or failed this poll."""
 
         for name in virtualservers:
-            log.info("Virtualserver '%s' is gone; removing its series", name)
+            log.info("Virtualserver '%s' was not read; removing its series", name)
             for gauge in self.gauges.values():
                 _remove_series(gauge, name)
             _remove_series(self.exporter_metrics.missing_fields, name)

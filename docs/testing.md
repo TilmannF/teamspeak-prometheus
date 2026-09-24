@@ -60,7 +60,8 @@ The production client is tested against three independent things:
   of the escaping rules; the fake server uses it and the client tests compare
   against it.
 * **The fake server.** Two-line banner, `\n\r` framing, error trailers and
-  TeamSpeak-style flood protection, over real TCP. With `hostile=True` it
+  TeamSpeak-style flood protection, over real TCP. `stopped={2}` reports a
+  virtualserver `offline` and fails `use` on it with error 1033. With `hostile=True` it
   echoes the password and embeds forged log lines in its error text, to prove
   neither reaches the log.
 

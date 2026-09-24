@@ -78,8 +78,10 @@ teamspeak_virtualserver_clientsonline{virtualserver_name="Zweiter Server"} 3.0
 ```
 
 Virtualservers are discovered on every poll via `serverlist`, so a newly created
-one appears without a restart. A removed one — or one that could not be read,
-for example because it is stopped — disappears from the next poll's output.
+one appears without a restart. A removed or stopped one — or one that could
+not be read — disappears from the next poll's output. A stopped virtualserver
+is a state of the host, not an exporter error: it does not affect
+`teamspeak_exporter_poll_success`.
 
 If a `serverinfo` field is missing or not a number, only that series is left
 out; the rest of the virtualserver is still exported and

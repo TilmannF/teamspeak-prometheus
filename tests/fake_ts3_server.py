@@ -34,7 +34,11 @@ DEFAULT_NAMES = ['Test Server', 'Zweiter Server']
 def virtualservers(count: int) -> list[dict[str, object]]:
     names = DEFAULT_NAMES + [f'Server {n}' for n in range(3, count + 1)]
     return [
-        {'virtualserver_id': sid, 'virtualserver_name': names[sid - 1]}
+        {
+            'virtualserver_id': sid,
+            'virtualserver_name': names[sid - 1],
+            'virtualserver_status': 'online',
+        }
         for sid in range(1, count + 1)
     ]
 
@@ -119,6 +123,9 @@ class _Handler(socketserver.StreamRequestHandler):
                 selected = self._find(keys.get('sid'))
                 if selected is None:
                     self._error(1024, 'invalid serverID')
+                elif selected['virtualserver_status'] != 'online':
+                    self._error(1033, 'server is not running')
+                    selected = None
                 elif self.server.hostile and selected['virtualserver_id'] == 2:
                     # echoes the password it was sent at login
                     self._error(
@@ -181,6 +188,9 @@ class FakeTs3Server:
     many commands per ``flood_window`` seconds, shared by all connections --
     TeamSpeak counts per client IP, and every test client is 127.0.0.1.
 
+    ``stopped`` lists virtualserver ids reported ``offline`` by ``serverlist``;
+    ``use`` on them fails with error 1033, as on TeamSpeak 3.13.
+
     ``hostile`` makes it behave like a compromised server: a rejected login and
     ``use`` of virtualserver 2 answer with error text that echoes the password
     and embeds a line break followed by ``FORGED_LOG_LINE``.
@@ -195,10 +205,16 @@ class FakeTs3Server:
         flood_limit: int | None = None,
         flood_window: float = 3.0,
         hostile: bool = False,
+        stopped: frozenset[int] = frozenset(),
     ):
         self._server = _Server((host, port), _Handler)
         self._server.password = password
-        self._server.virtualservers = virtualservers(virtualserver_count)
+        self._server.virtualservers = [
+            {**server, 'virtualserver_status': 'offline'}
+            if server['virtualserver_id'] in stopped
+            else server
+            for server in virtualservers(virtualserver_count)
+        ]
         self._server.flood = _FloodGuard(flood_limit, flood_window)
         self._server.hostile = hostile
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)

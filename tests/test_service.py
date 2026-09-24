@@ -131,6 +131,96 @@ def test_an_offline_virtualserver_is_skipped_and_the_rest_still_read():
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='query') == 1
 
 
+def test_a_session_deadline_counts_as_a_connection_error():
+    def hanging(host: str, port: int):
+        raise TimeoutError('ServerQuery session did not finish within 60s')
+
+    setup = Setup(factory=hanging)
+
+    assert setup.service.poll() is app.PollResult.FAILED
+    assert setup.value('teamspeak_exporter_poll_errors_total', reason='connection') == 1
+
+
+def stopped_second(status: str = 'offline') -> list[dict[str, object]]:
+    return [
+        {
+            'virtualserver_id': 1,
+            'virtualserver_name': 'First',
+            'virtualserver_status': 'online',
+        },
+        {
+            'virtualserver_id': 2,
+            'virtualserver_name': 'Second',
+            'virtualserver_status': status,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    'status', ['offline', 'virtual', 'booting up', 'deploy running']
+)
+def test_a_virtualserver_that_is_not_online_is_skipped_without_error(status):
+    setup = Setup(servers=stopped_second(status))
+
+    assert setup.service.poll() is app.PollResult.OK
+
+    assert setup.calls('use') == [('use', 1)]
+    assert setup.value('teamspeak_exporter_poll_success') == 1
+    assert setup.value('teamspeak_exporter_poll_errors_total', reason='query') == 0
+    assert (
+        setup.value('teamspeak_exporter_last_successful_poll_timestamp_seconds')
+        == setup.now
+    )
+
+
+def test_a_virtualserver_that_stops_loses_its_series():
+    setup = Setup()
+    setup.service.poll()
+    setup.client.servers = stopped_second()
+
+    setup.service.poll()
+
+    assert (
+        setup.value('teamspeak_virtualserver_uptime', virtualserver_name='Second')
+        is None
+    )
+    assert (
+        setup.value('teamspeak_exporter_missing_fields', virtualserver_name='Second')
+        is None
+    )
+    assert (
+        setup.value('teamspeak_virtualserver_uptime', virtualserver_name='First')
+        is not None
+    )
+
+
+def test_a_stopped_virtualserver_is_logged_once_and_again_when_back(caplog):
+    setup = Setup(servers=stopped_second())
+    caplog.set_level('INFO', logger='teamspeak_prometheus')
+
+    setup.service.poll()
+    setup.service.poll()
+    setup.client.servers = stopped_second('online')
+    setup.service.poll()
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("2 'Second' is offline" in m for m in messages) == 1
+    assert sum("2 'Second' is online again" in m for m in messages) == 1
+    assert (
+        setup.value('teamspeak_virtualserver_uptime', virtualserver_name='Second')
+        is not None
+    )
+
+
+def test_a_virtualserver_without_a_status_is_read():
+    # serverlist always reports a status on TeamSpeak 3.13; be lenient anyway
+    setup = Setup()
+
+    setup.service.poll()
+
+    assert setup.calls('use') == [('use', 1), ('use', 2)]
+
+
 def test_an_unexpected_exception_does_not_escape_the_poll():
     def broken(host: str, port: int):
         raise RuntimeError('boom')

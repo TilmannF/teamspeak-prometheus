@@ -73,6 +73,10 @@ It is the state as shipped: what a user gets if they pull this tag today.
   only that series is left out.
 - Series of removed virtualservers are dropped instead of keeping their last
   value until restart.
-- ServerQuery reads have a 10-second timeout instead of none.
+- ServerQuery reads have a 10-second timeout instead of none, and a whole
+  session a 60-second deadline, so a server that trickles data or never ends
+  a line cannot stall the exporter.
+- Stopped virtualservers are skipped instead of failing every poll.
+- A malformed ServerQuery error line is an error, not success.
 
 [1.0.0]: https://github.com/TilmannF/teamspeak-prometheus/releases/tag/v1.0.0

@@ -11,6 +11,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -329,3 +330,59 @@ def test_a_malformed_flag_overridden_by_the_environment_does_not_stop_startup():
     assert 'Ignoring --ts3port (TEAMSPEAK_PORT is set)' in output
     assert 'Ignoring --loglevel (LOG_LEVEL is set)' in output
     assert PASSWORD not in output
+
+
+def test_a_stopped_virtualserver_does_not_fail_the_poll():
+    with FakeTs3Server(password=PASSWORD, stopped=frozenset({2})) as server:
+        output = run_app(
+            {
+                'TEAMSPEAK_HOST': server.host,
+                'TEAMSPEAK_PORT': str(server.port),
+                'TEAMSPEAK_PASSWORD': PASSWORD,
+            },
+            re.compile(r'^teamspeak_exporter_poll_success 1\.0', re.M),
+        )
+
+    assert "Virtualserver 2 'Zweiter Server' is offline" in output
+    assert 'Skipping' not in output
+
+
+@pytest.fixture
+def trickling_server():
+    """A TCP server that greets like TeamSpeak, then sends one byte every
+    0.2s forever, never ending the line."""
+
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    listener.listen()
+    stop_event = threading.Event()
+
+    def serve() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            connection.sendall(b'TS3\n\rWelcome\n\r')
+            while not stop_event.is_set():
+                try:
+                    connection.sendall(b'x')
+                except OSError:
+                    return
+                time.sleep(0.2)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    yield listener.getsockname()[1]
+    stop_event.set()
+    listener.close()
+
+
+def test_a_trickling_server_cannot_stall_a_session(trickling_server):
+    client = app.ServerQueryClient.connect(
+        '127.0.0.1', trickling_server, session_timeout=2
+    )
+    started = time.monotonic()
+
+    with pytest.raises(TimeoutError):
+        client.serverlist()
+
+    assert time.monotonic() - started < 4
+    client.close()

@@ -68,6 +68,13 @@ this handling existed, it silently skipped the rest of the virtualservers.
 Flooding on regardless gets the IP banned, after which TeamSpeak closes new
 connections without a greeting.
 
+Every read has a 10s socket timeout, and a whole session has a 60s deadline
+(`POLL_TIMEOUT_IN_SECONDS`): a server trickling bytes or sending notifications
+without end cannot stall a poll, because each read is bounded by the time left.
+A flood wait that would cross the deadline is not slept. Lines longer than 1 MiB
+(`MAX_LINE_BYTES`) are rejected. An `error` trailer without a numeric id is a
+protocol error, not success.
+
 ## Error behavior
 
 The process only exits for invalid configuration or a metrics port it cannot
@@ -76,10 +83,13 @@ bind. Everything else is logged, counted, and retried:
 | Situation | Behavior | Counted as |
 | --- | --- | --- |
 | Connection refused, dropped, timed out, IP banned | poll fails, backoff | `reason="connection"` |
+| Session exceeds 60s, or a line exceeds 1 MiB | poll fails, backoff | `reason="connection"` |
+| `error` trailer without a numeric id | poll or step fails | `reason="query"` |
 | Login rejected: wrong credentials (error 520) | poll fails, backoff | `reason="login"` |
 | Login fails otherwise (flooding, ban, permission) | poll fails, backoff | `reason="query"` |
 | `serverlist` returns an error | poll fails, backoff | `reason="query"` |
-| One virtualserver fails (`use`/`serverinfo` error, e.g. stopped) | skipped, others still read, poll partial | `reason="query"` |
+| A virtualserver is not `online` in `serverlist` (stopped, booting, …) | skipped, not an error; logged once per status change | — |
+| One online virtualserver fails (`use`/`serverinfo` error) | skipped, others still read, poll partial | `reason="query"` |
 | `error id=524` flooding | wait and retry, up to 3 times | `reason="query"` if still failing |
 | `serverinfo` field missing or not numeric | that series skipped and removed, warning logged once | `teamspeak_exporter_missing_fields` |
 | Anything else | logged with traceback, poll fails, backoff | `reason="unexpected"` |
@@ -112,8 +122,9 @@ text. That over-censors, but never leaks.
 
 ## Series lifecycle
 
-After every poll that got a `serverlist`, the series of virtualservers that are
-no longer listed (deleted, or skipped because they failed) are removed. A
+After every poll that got a `serverlist`, the series of virtualservers that
+were not read are removed: deleted ones, ones not `online`, and ones that failed
+this poll. A
 missing `serverinfo` field removes just that series.
 
 ## Container healthcheck

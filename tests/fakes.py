@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from app import METRICS_NAMES, LoginFailed, ServerQueryError
@@ -83,6 +84,19 @@ def factory_for(client: FakeTs3Client):
     return make
 
 
+@dataclass
+class FakeClock:
+    """A monotonic clock tests advance by hand."""
+
+    now: float = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
 def unreachable(host: str, port: int) -> FakeTs3Client:
     """A ``ClientFactory`` for a server that refuses connections."""
 
@@ -93,19 +107,41 @@ class FakeConnection:
     """A scripted socket: ``recv`` hands out ``replies`` one chunk at a time.
 
     Everything the client sends is kept in ``sent`` so tests can assert on the
-    exact wire bytes.
+    exact wire bytes. ``replies`` may be an endless iterator; ``clock`` then
+    lets each ``recv`` advance a fake clock by ``seconds_per_recv``.
     """
 
-    def __init__(self, *replies: bytes) -> None:
+    def __init__(
+        self,
+        *replies: bytes,
+        endless: Iterator[bytes] | None = None,
+        clock: FakeClock | None = None,
+        seconds_per_recv: float = 0.0,
+    ) -> None:
         self.replies = list(replies)
+        self.endless = endless
+        self.clock = clock
+        self.seconds_per_recv = seconds_per_recv
         self.sent: list[bytes] = []
+        self.timeouts: list[float] = []
+        self.recv_calls = 0
         self.closed = False
 
     def sendall(self, data: bytes, /) -> None:
         self.sent.append(data)
 
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
+
     def recv(self, bufsize: int, /) -> bytes:
-        return self.replies.pop(0) if self.replies else b''
+        self.recv_calls += 1
+        if self.clock is not None:
+            self.clock.now += self.seconds_per_recv
+        if self.replies:
+            return self.replies.pop(0)
+        if self.endless is not None:
+            return next(self.endless)
+        return b''
 
     def close(self) -> None:
         self.closed = True

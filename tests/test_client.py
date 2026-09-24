@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 
 import pytest
 
 import app
-from tests.fakes import FakeConnection
+from tests.fakes import FakeClock, FakeConnection
 from tests.serverquery import escape as reference_escape
 
 FIXTURES = Path(__file__).parent / 'fixtures'
@@ -217,3 +218,110 @@ def test_close_says_quit_and_closes_the_socket():
 def test_escaping_matches_the_reference_encoder(value: str):
     assert app.escape(value) == reference_escape(value)
     assert app.unescape(reference_escape(value)) == value
+
+
+# -- a server that never finishes --------------------------------------------
+
+
+def ticking_client(connection: FakeConnection, clock: FakeClock, timeout: float = 60):
+    return app.ServerQueryClient(
+        connection, sleep=clock.sleep, clock=clock, timeout=timeout
+    )
+
+
+def test_a_trickling_server_hits_the_session_deadline():
+    clock = FakeClock()
+    connection = FakeConnection(
+        BANNER, endless=itertools.repeat(b'x'), clock=clock, seconds_per_recv=1
+    )
+    query = ticking_client(connection, clock)
+
+    with pytest.raises(TimeoutError, match='60s'):
+        query.serverlist()
+
+    assert connection.recv_calls <= 62  # banner, then about one byte a second
+
+
+def test_endless_notifications_hit_the_session_deadline():
+    clock = FakeClock()
+    connection = FakeConnection(
+        BANNER,
+        endless=itertools.repeat(b'notifytextmessage msg=hi\n\r'),
+        clock=clock,
+        seconds_per_recv=1,
+    )
+    query = ticking_client(connection, clock)
+
+    with pytest.raises(TimeoutError):
+        query.serverlist()
+
+
+def test_no_read_waits_past_the_session_deadline():
+    clock = FakeClock()
+    connection = FakeConnection(BANNER, OK, clock=clock, seconds_per_recv=0)
+    query = ticking_client(connection, clock, timeout=4)
+    connection.timeouts.clear()
+
+    clock.now = 1.5
+    query.use(1)
+
+    assert connection.timeouts == [2.5]  # min(remaining, per-read timeout)
+
+
+def test_every_read_is_bounded_by_the_per_read_timeout():
+    clock = FakeClock()
+    connection = FakeConnection(BANNER, OK, clock=clock)
+    query = ticking_client(connection, clock, timeout=60)
+    connection.timeouts.clear()
+
+    query.use(1)
+
+    assert connection.timeouts == [app.SERVERQUERY_TIMEOUT_IN_SECONDS]
+
+
+def test_a_flood_wait_beyond_the_deadline_is_not_slept():
+    clock = FakeClock()
+    query = ticking_client(
+        FakeConnection(BANNER, flood_error(10), clock=clock), clock, 5
+    )
+
+    with pytest.raises(TimeoutError):
+        query.serverlist()
+
+    assert clock.now == 0  # gave up instead of sleeping 10s
+
+
+def test_an_overlong_line_is_rejected():
+    chunk = b'x' * 65536
+    connection = FakeConnection(BANNER, endless=itertools.repeat(chunk))
+    query = app.ServerQueryClient(connection)
+
+    with pytest.raises(ConnectionError, match='longer than'):
+        query.serverlist()
+
+    assert connection.recv_calls <= app.MAX_LINE_BYTES // len(chunk) + 3
+
+
+def test_a_line_at_the_size_limit_is_accepted():
+    payload = b'virtualserver_name=' + b'x' * (app.MAX_LINE_BYTES - 32)
+    query, _ = client(payload + b'\n\r', OK)
+
+    assert len(query.serverlist()[0]['virtualserver_name']) == app.MAX_LINE_BYTES - 32
+
+
+# -- malformed trailers -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'trailer',
+    [b'error msg=boom\n\r', b'error id= msg=boom\n\r', b'error id=abc msg=boom\n\r'],
+    ids=['no-id', 'empty-id', 'non-numeric-id'],
+)
+def test_an_error_line_without_a_numeric_id_is_not_success(trailer: bytes):
+    query, _ = client(b'virtualserver_id=1\n\r', trailer)
+
+    with pytest.raises(app.ServerQueryError) as caught:
+        query.serverlist()
+
+    assert caught.value.error_id == -1
+    assert 'malformed response' in str(caught.value)
