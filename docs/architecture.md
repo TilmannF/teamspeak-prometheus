@@ -107,7 +107,8 @@ exporter_argv(/proc)        every /proc/<pid>/cmdline, lowest PID first,
                             skipping itself; the arguments after app.py
 metrics_port(argv, env)     app.parse_args + app.resolve_config:
                             the exporter's own precedence rules
-probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout
+probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout,
+                            never through a proxy
 ```
 
 * All processes are searched, not only PID 1, so `docker run --init` and
@@ -119,6 +120,11 @@ probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout
   output is swallowed and error messages never repeat an argument, so the
   healthcheck output — stored by Docker and visible via `docker inspect` —
   cannot contain it.
+* Proxy variables (`http_proxy`, `HTTP_PROXY`, `all_proxy`) are ignored. The
+  healthcheck inherits the container environment, Docker can inject proxy
+  settings into every container, and urllib would otherwise send the loopback
+  request to the proxy unless `NO_PROXY` lists 127.0.0.1 — reporting a working
+  exporter as unhealthy.
 * The healthcheck runs as the same non-root user as the exporter, which is what
   allows it to read the exporter's `/proc` entry.
 * Healthy is deliberately independent of TeamSpeak. An orchestrator that

@@ -122,7 +122,9 @@ services:
 The image runs as a non-root user (UID 10001) and has a Docker `HEALTHCHECK`.
 Healthy means the metrics endpoint answers — on whichever port the exporter
 actually uses, whether set with `METRICS_PORT` or with `--metricsport` in an
-overridden container command, also behind `--init` or a shell wrapper.
+overridden container command, also behind `--init` or a shell wrapper. It
+always talks to the exporter directly, ignoring any `HTTP_PROXY` in the
+container environment.
 
 The container stays healthy while TeamSpeak is unreachable, on purpose: a
 TeamSpeak outage should not get the exporter restarted. Alert on

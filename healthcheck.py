@@ -7,7 +7,8 @@ environment variables but not the exporter's command-line flags, so a probe of
 This script finds the running exporter in ``/proc``, reads its arguments, and
 resolves the metrics port with the exporter's own ``parse_args`` and
 ``resolve_config`` -- same precedence rules, no duplicated logic. Then it
-requests ``/metrics`` on that port.
+requests ``/metrics`` on that port, bypassing any proxy configured in the
+environment.
 
 Healthy (exit 0) means the metrics endpoint answers. Whether TeamSpeak is
 reachable is deliberately not part of it: that is what
@@ -91,9 +92,19 @@ def metrics_port(argv: list[str], env: Mapping[str, str]) -> int:
 
 
 def probe(port: int) -> None:
+    """Request ``/metrics`` on the loopback interface, never through a proxy.
+
+    urllib honours ``http_proxy``/``HTTP_PROXY``/``all_proxy`` from the
+    environment and exempts 127.0.0.1 only when ``NO_PROXY`` says so. The
+    healthcheck inherits the container's environment -- Docker can inject proxy
+    variables into every container -- and a proxy cannot reach this
+    container's loopback anyway, so proxies are disabled outright.
+    """
+
     url = f'http://127.0.0.1:{port}/metrics'
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(url, timeout=PROBE_TIMEOUT_IN_SECONDS):
+        with direct.open(url, timeout=PROBE_TIMEOUT_IN_SECONDS):
             pass
     except OSError as err:
         raise HealthcheckError(f'{url} did not answer: {err}') from err

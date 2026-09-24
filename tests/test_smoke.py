@@ -22,6 +22,11 @@ from tests.fake_ts3_server import FakeTs3Server, virtualservers
 pytestmark = pytest.mark.smoke
 
 PASSWORD = 'smoke-test-password'
+
+# Scrapes go to 127.0.0.1 directly. requests honours proxy variables from the
+# environment, so a developer's HTTP_PROXY would otherwise break every test here.
+HTTP = requests.Session()
+HTTP.trust_env = False
 CONNECTION_ERRORS = re.compile(
     r'^teamspeak_exporter_poll_errors_total\{reason="connection"\} [1-9]', re.M
 )
@@ -87,7 +92,7 @@ def scrape(port: int, names: list[str], timeout: float = 20.0) -> str:
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            body = requests.get(f'http://127.0.0.1:{port}/metrics', timeout=2).text
+            body = HTTP.get(f'http://127.0.0.1:{port}/metrics', timeout=2).text
             if all(
                 f'teamspeak_virtualserver_uptime{{virtualserver_name="{name}"}}' in body
                 for name in names
@@ -162,7 +167,7 @@ def test_an_unreachable_server_keeps_the_exporter_alive():
         body = ''
         while time.monotonic() < deadline:
             try:
-                body = requests.get(f'http://127.0.0.1:{port}/metrics', timeout=2).text
+                body = HTTP.get(f'http://127.0.0.1:{port}/metrics', timeout=2).text
                 if CONNECTION_ERRORS.search(body):
                     break
             except requests.RequestException:
@@ -201,3 +206,17 @@ def test_the_healthcheck_probe_accepts_a_live_metrics_endpoint(exporter):
 def test_the_healthcheck_probe_rejects_a_closed_port():
     with pytest.raises(healthcheck.HealthcheckError, match='did not answer'):
         healthcheck.probe(free_port())
+
+
+@pytest.mark.parametrize('variable', ['http_proxy', 'HTTP_PROXY', 'all_proxy'])
+def test_the_healthcheck_probe_ignores_a_proxy_in_the_environment(
+    exporter, monkeypatch, variable
+):
+    # Nothing listens on the proxy port: going through it would fail the probe.
+    _, port = exporter
+    scrape(port, names())
+    monkeypatch.delenv('no_proxy', raising=False)
+    monkeypatch.delenv('NO_PROXY', raising=False)
+    monkeypatch.setenv(variable, f'http://127.0.0.1:{free_port()}')
+
+    healthcheck.probe(port)

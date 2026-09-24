@@ -72,10 +72,11 @@ Replace `virtualserver_unique_identifier` before committing.
 
 ## The container healthcheck
 
-`make docker-healthcheck` builds the image and starts it seven ways — default,
+`make docker-healthcheck` builds the image and starts it eight ways — default,
 `METRICS_PORT`, `--metricsport` in the command, behind `--init`, behind
-`sh -c`, env and flag both set, and without an exporter — then waits for
-Docker's verdict on each. The first six must turn healthy, the last unhealthy,
+`sh -c`, env and flag both set, with an unreachable HTTP proxy in the
+environment, and without an exporter — then waits for Docker's verdict on
+each. The first seven must turn healthy, the last unhealthy,
 and no healthcheck output may contain the password passed in one of them. CI
 runs it in the `docker` job. It takes about 20 seconds and needs no TeamSpeak
 server.

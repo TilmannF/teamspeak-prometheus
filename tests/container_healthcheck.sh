@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end test of the image's HEALTHCHECK: every supported way of choosing
-# the metrics port must end healthy, and a container without a running
-# exporter must end unhealthy.
+# the metrics port, and a proxy in the environment, must end healthy; a
+# container without a running exporter must end unhealthy.
 #
 #   tests/container_healthcheck.sh [image]      (default: teamspeak-prometheus:dev)
 #
@@ -70,6 +70,10 @@ start metrics-port-flag -- python /app/app.py --metricsport 9100 --ts3password "
 start behind-init --init -- python /app/app.py --metricsport 9100
 start shell-wrapper -- sh -c 'python /app/app.py --metricsport 9100'
 start env-beats-flag -e METRICS_PORT=9200 -- python /app/app.py --metricsport 9100
+# A proxy for every HTTP request, as Docker's client-side proxy settings inject
+# it; nothing listens on port 1. The loopback probe must not go through it.
+start behind-proxy -e http_proxy=http://127.0.0.1:1 -e HTTP_PROXY=http://127.0.0.1:1 \
+  -e all_proxy=http://127.0.0.1:1 --
 start no-exporter -- sleep 300
 
 expect default healthy
@@ -78,6 +82,7 @@ expect metrics-port-flag healthy
 expect behind-init healthy
 expect shell-wrapper healthy
 expect env-beats-flag healthy
+expect behind-proxy healthy
 expect no-exporter unhealthy
 
 exit "$FAILED"
