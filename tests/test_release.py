@@ -1,8 +1,9 @@
-"""Release consistency: the tag, ``__version__`` and CHANGELOG.md agree.
+"""Release consistency: the tag, ``__version__`` and CHANGELOG.md agree, and
+only a validated tag push can publish.
 
 ``.github/scripts/validate-release-tag.sh`` runs in the release workflow before
 anything is published. Its tests spawn bash, so they are ``smoke``; the checks
-of the repository itself are plain unit tests.
+of the repository and of the workflow file itself are plain unit tests.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 import app
 
@@ -121,3 +123,99 @@ def test_the_real_repository_validates_for_its_own_version():
     )
 
     assert result.returncode == 0, result.stdout
+
+
+# -- the release workflow: only a validated tag push can publish --------------
+
+WORKFLOW = ROOT / '.github' / 'workflows' / 'release.yml'
+TAG_PUSH = "github.event_name == 'push'"
+
+
+def workflow() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text())
+
+
+def steps() -> list[dict]:
+    return workflow()['jobs']['release']['steps']
+
+
+def index_of(predicate) -> list[int]:
+    return [i for i, step in enumerate(steps()) if predicate(step)]
+
+
+def uses(action: str):
+    return lambda step: str(step.get('uses', '')).startswith(action + '@')
+
+
+def gated_on_tag_push(condition: str) -> bool:
+    """``condition`` is the tag-push check, alone or AND-ed with more -- never
+    something an OR could open up."""
+
+    return '||' not in condition and (
+        condition == TAG_PUSH or condition.startswith(TAG_PUSH + ' && ')
+    )
+
+
+@pytest.mark.parametrize(
+    ('condition', 'expected'),
+    [
+        (TAG_PUSH, True),
+        (TAG_PUSH + " && steps.dockerhub.outputs.enabled == 'true'", True),
+        (TAG_PUSH + ' || true', False),
+        ("steps.dry_run.outputs.value != 'true'", False),
+        ('', False),
+    ],
+)
+def test_the_gate_check_itself(condition, expected):
+    assert gated_on_tag_push(condition) is expected
+
+
+def test_a_manual_run_takes_no_inputs():
+    # YAML 1.1 reads the key "on" as True
+    triggers = workflow()[True]
+
+    assert 'workflow_dispatch' in triggers
+    assert not (triggers['workflow_dispatch'] or {}).get('inputs')
+
+
+def test_the_tag_check_runs_on_every_tag_push():
+    (validate,) = index_of(lambda s: s.get('name') == 'Validate release tag')
+    step = steps()[validate]
+
+    assert step['if'] == TAG_PUSH
+    assert 'validate-release-tag.sh' in step['run']
+
+
+@pytest.mark.parametrize(
+    'publishing',
+    [
+        'docker/login-action',
+        'actions/attest-build-provenance',
+        'softprops/action-gh-release',
+    ],
+)
+def test_publishing_steps_run_only_on_a_tag_push_after_the_check(publishing):
+    (validate,) = index_of(lambda s: s.get('name') == 'Validate release tag')
+    found = index_of(uses(publishing))
+
+    assert found
+    for i in found:
+        assert gated_on_tag_push(steps()[i].get('if', '')), steps()[i]
+        assert i > validate
+
+
+def test_images_are_pushed_only_on_a_tag_push_after_the_check():
+    (validate,) = index_of(lambda s: s.get('name') == 'Validate release tag')
+    (build,) = index_of(uses('docker/build-push-action'))
+
+    assert steps()[build]['with']['push'] == '${{ ' + TAG_PUSH + ' }}'
+    assert build > validate
+
+
+def test_latest_is_tagged_only_on_a_tag_push():
+    (meta,) = index_of(uses('docker/metadata-action'))
+
+    assert (
+        f'type=raw,value=latest,enable=${{{{ {TAG_PUSH} }}}}'
+        in (steps()[meta]['with']['tags'])
+    )

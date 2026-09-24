@@ -47,5 +47,13 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    `DOCKERHUB_TOKEN` are configured as repository secrets), attests build
    provenance, and creates a GitHub Release with generated notes.
 
-To prove the build without publishing anything, run the same workflow via
-`workflow_dispatch` with `dry_run: true`.
+To prove the build without publishing anything, start the workflow manually
+(`workflow_dispatch`, "Run workflow" in the Actions tab). A manual run always
+only builds: it never logs in to a registry, pushes, attests, or creates a
+release — publishing happens only for a pushed tag that passed the check in
+step 3.
+
+To retry a release that failed after the tag was pushed, re-run the original
+tag-push run ("Re-run jobs"). That run is a tag push again, so the tag is
+validated again. `tests/test_release.py` fails if any publishing step could
+run without a validated tag push.
