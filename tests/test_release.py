@@ -318,3 +318,35 @@ def test_no_checkout_persists_its_credentials():
     ]
 
     assert persisting == []
+
+
+# -- the default branch is main --------------------------------------------------
+
+
+def test_workflows_trigger_on_the_default_branch_only():
+    # A leftover branch name here silently stops CI on pushes to main.
+    for path in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
+        triggers = yaml.safe_load(path.read_text())[True]  # YAML 1.1: "on" is True
+        for event in ('push', 'pull_request'):
+            branches = ((triggers or {}).get(event) or {}).get('branches')
+            if branches is not None:
+                assert branches == ['main'], f'{path.name}: {event} on {branches}'
+
+
+def test_no_file_refers_to_the_old_default_branch():
+    stale = [
+        path.relative_to(ROOT).as_posix()
+        for path in [
+            *ROOT.glob('*.md'),
+            *(ROOT / 'docs').glob('*.md'),
+            *(ROOT / '.github').rglob('*.yml'),
+        ]
+        if path.name != 'CODE_OF_CONDUCT.md'
+        and (
+            'blob/master' in path.read_text()
+            or '[master]' in path.read_text()
+            or '`master`' in path.read_text()
+        )
+    ]
+
+    assert stale == []

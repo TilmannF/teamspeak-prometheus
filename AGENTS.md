@@ -149,9 +149,9 @@ If you notice something new that belongs on that list, add it to the list rather
 
 ## Branching and Pull Requests
 
-Work happens on a branch, never directly on `master`.
+Work happens on a branch, never directly on `main`.
 
-Follow-up milestones stack: branch off the previous milestone's branch, not `master`, so each pull request's diff stays scoped to its own milestone.
+Follow-up milestones stack: branch off the previous milestone's branch, not `main`, so each pull request's diff stays scoped to its own milestone.
 
 One purpose per pull request. Concise commit subjects, lowercase, imperative:
 
