@@ -4,4 +4,4 @@
 # against 0.7.1, 0.9.0, 0.14.1, 0.20.0 and 0.26.0 on Python 3.12. The floor
 # predates this repository's tests and start_http_server has accepted the
 # registry keyword since well before it.
-prometheus_client>=0.7.1,<1.0
+prometheus_client>=0.26.0,<1.0
