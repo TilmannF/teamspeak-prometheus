@@ -12,8 +12,14 @@ updates:
       github-actions:
         patterns: ["*"]
 
+  # requirements*.txt declare ranges, and the floors are real: the suite is
+  # verified against the oldest version in each range (see requirements.txt).
+  # Only move a floor or ceiling when a new release falls outside the range --
+  # the image installs the newest allowed version anyway. The default strategy
+  # would raise every floor to the latest release.
   - package-ecosystem: "pip"
     directory: "/"
+    versioning-strategy: increase-if-necessary
     schedule:
       interval: "weekly"
     cooldown:
