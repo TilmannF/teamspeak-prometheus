@@ -896,3 +896,43 @@ def test_a_throttled_host_is_read_completely_past_the_base_budget():
             client.close()
 
     assert len(listed) == 20
+
+
+FORGED = '2026-09-25 12:00:00,000 CRITICAL forged'
+
+
+@pytest.mark.parametrize(
+    ('argv', 'env'),
+    [
+        (['app.py'], {'TEAMSPEAK_HOST': f'ts.example.com\n{FORGED}'}),
+        (['app.py'], {'TEAMSPEAK_USERNAME': f'serveradmin\r\n{FORGED}'}),
+        (['app.py', '--ts3host', f'ts.example.com\u2028{FORGED}'], {}),
+        (
+            [
+                '-m',
+                'tests.exporter_harness',
+                '--ts3host',
+                f'x\n{FORGED}',
+                '--ts3port',
+                '1',
+                '--iterations',
+                '1',
+                '--interval',
+                '0.2',
+            ],
+            {},
+        ),
+    ],
+    ids=['exporter-host', 'exporter-username', 'exporter-host-flag', 'harness-host'],
+)
+def test_a_configured_value_cannot_forge_output_lines(argv, env):
+    output = run_briefly(
+        argv,
+        {'TEAMSPEAK_PORT': str(free_port()), 'METRICS_PORT': str(free_port()), **env}
+        if argv[0] == 'app.py'
+        else env,
+    )
+
+    assert 'TS3 SETTINGS' in output
+    assert FORGED in output  # logged, escaped onto the line it belongs to
+    assert not any(line.startswith(FORGED) for line in output.splitlines())

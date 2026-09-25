@@ -158,9 +158,9 @@ def main(
     try:
         port = check(env, proc, prober)
     except HealthcheckError as err:
-        print(app.redact(f'unhealthy: {err}', secrets))
+        print(app.printable(f'unhealthy: {err}', secrets))
         return 1
-    print(app.redact(f'healthy: metrics endpoint on port {port} answers', secrets))
+    print(app.printable(f'healthy: metrics endpoint on port {port} answers', secrets))
     return 0
 
 

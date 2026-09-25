@@ -132,8 +132,15 @@ which on every record
   a number that happens to be the password (`TEAMSPEAK_PASSWORD=8000` with the
   default metrics port 8000) and a secret split across template and argument.
 
-The message templates are the exporter's own text and are not escaped; the
-multi-line settings banner stays readable. Numeric arguments are not escaped
+The message templates are the exporter's own, fixed text and are not escaped;
+the multi-line settings banner stays readable. That only holds if no value is
+ever formatted into a template: the banner is the constant `SETTINGS_BANNER`
+with host, port, username and interval as arguments, so a host containing a
+line break cannot add a line to the log. `tests/test_output.py` scans every log
+call in the repository and fails on a template built at runtime (an f-string, a
+concatenation, a function call). The healthcheck and the test tools print
+instead of logging; their lines go through `printable()`, which censors and
+escapes the same way. Numeric arguments are not escaped
 either, so `%d` keeps working. A format string that does not fit its arguments
 is logged as template plus arguments instead of raising — logging would
 otherwise print its own error report, arguments included, past the filter.

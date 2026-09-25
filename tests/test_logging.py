@@ -253,10 +253,43 @@ def test_overlapping_secrets_leave_nothing_behind():
     assert all(s not in redacted('abab aba', 'ab', 'ba') for s in ('ab', 'ba'))
 
 
-def test_the_settings_banner_never_shows_a_password_it_contains():
-    banner = app.describe_settings(app.resolve_config(app.parse_args([]), {}))
+def banner(secrets=(SECRET,), **env: str) -> str:
+    """The settings banner as the exporter logs it, through the filter."""
 
-    assert 'censor' not in filtered(banner, secrets=['censor'])
+    config = app.resolve_config(app.parse_args([]), env)
+    return filtered(
+        app.SETTINGS_BANNER, *app.settings_arguments(config), secrets=secrets
+    )
+
+
+def test_the_settings_banner_never_shows_a_password_it_contains():
+    assert 'censor' not in banner(secrets=['censor'])
+
+
+@pytest.mark.parametrize(
+    'variable', ['TEAMSPEAK_HOST', 'TEAMSPEAK_USERNAME'], ids=['host', 'username']
+)
+@pytest.mark.parametrize(
+    'control',
+    ['\n', '\r\n', '\x1b[2K\r', '\u2028', '\x85'],
+    ids=['newline', 'crlf', 'terminal-escape', 'line-separator', 'c1'],
+)
+def test_a_configured_value_cannot_forge_banner_lines(variable, control):
+    forged = '2026-09-25 12:00:00,000 CRITICAL forged'
+    output = banner(**{variable: f'value{control}{forged}'})
+
+    # the banner keeps its own six lines, and nothing else starts one
+    lines = output.splitlines()
+    assert [line.split(':')[0] for line in lines] == [
+        'TS3 SETTINGS',
+        'Host',
+        'Port',
+        'Username',
+        'Password',
+        'Poll interval',
+    ]
+    assert forged in output  # logged, but escaped onto its own field's line
+    assert not any(line.startswith(forged) for line in lines)
 
 
 def test_no_secret_survives_redaction_fuzzed():

@@ -20,8 +20,7 @@ from app import (
     RememberEveryValue,
     SafeArgumentParser,
     given_values,
-    redact,
-    secrets_for_redaction,
+    printable,
 )
 from tests.serverquery import (
     BANNER,
@@ -294,9 +293,9 @@ def main(argv: list[str] | None = None) -> int:
     # Censored even here: a port number is the password when someone picks it
     # as one. See AGENTS.md, "Secrets".
     print(
-        redact(
+        printable(
             f'Fake TS3 ServerQuery listening on {server.host}:{server.port}',
-            secrets_for_redaction(given_values(args, 'password')),
+            given_values(args, 'password'),
         )
     )
     try:

@@ -50,7 +50,7 @@ def run(
     # the banner still shows the interval actually used.
     config = dataclasses.replace(config, poll_interval=interval_in_seconds)
     app.configure_logging(config.log_level, secrets=secrets)
-    app.log.info(app.describe_settings(config))
+    app.log_settings(config)
 
     registry = CollectorRegistry()
     gauges = app.build_gauges(registry)
@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     def say(text: str) -> None:
         # Everything printed is censored like the exporter's log: even a port
         # number is the password when someone picks it as one. See AGENTS.md.
-        print(app.redact(text, secrets))
+        print(app.printable(text, secrets))
 
     fake = None
     ts3_host, ts3_port = args.ts3host, args.ts3port

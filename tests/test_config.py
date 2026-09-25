@@ -166,8 +166,10 @@ def test_equal_values_in_different_spelling_are_not_reported():
     )
 
 
-def test_the_settings_banner_never_contains_the_password():
-    banner = app.describe_settings(resolve(TEAMSPEAK_PASSWORD='hunter2'))
+def test_the_settings_banner_never_contains_the_password(caplog):
+    caplog.set_level('INFO', logger='teamspeak_prometheus')
 
-    assert 'hunter2' not in banner
-    assert '*censored*' in banner
+    app.log_settings(resolve(TEAMSPEAK_PASSWORD='hunter2'))
+
+    assert 'hunter2' not in caplog.text
+    assert 'Password: *censored*' in caplog.text

@@ -34,6 +34,7 @@ make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 | `tests/fakes.py` | In-process fake client and scripted connection — no sockets |
 | `tests/test_serverquery.py` | Reference encoder round-trips |
 | `tests/test_client.py` | `ServerQueryClient` against scripted bytes and the real captures |
+| `tests/test_output.py` | Scans every log call for a template built at runtime; `printable()` for printed lines |
 | `tests/test_logging.py` | `RedactingFilter`: password censoring, forged-line escaping, a hostile server |
 | `tests/test_cli.py` | Flags as strings, argparse error masking in the exporter and the test tools, `main()` never printing the password, a repository scan for unmasked parsers |
 | `tests/test_release.py` | `__version__` and CHANGELOG agree; the release-tag script accepts only matching `vX.Y.Z`; in `release.yml`, only a validated tag push can log in, push, attest or release |

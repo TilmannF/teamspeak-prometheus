@@ -746,14 +746,21 @@ _OPTIONS: list[tuple[str, str, object, str, Callable[[str, object], object]]] = 
 ]
 
 
-def describe_settings(config: Config) -> str:
-    """Render the startup banner. The password is never included."""
+# The startup banner. A fixed template: the configured values are logging
+# arguments, so the filter escapes them -- a host with a line break in it cannot
+# add lines to the log. The password is never among them.
+SETTINGS_BANNER = (
+    'TS3 SETTINGS:\nHost: %s\nPort: %s\nUsername: %s\nPassword: *censored*\n'
+    'Poll interval: %gs'
+)
 
-    return (
-        f'TS3 SETTINGS:\nHost: {config.host}\nPort: {config.port}\n'
-        f'Username: {config.username}\nPassword: *censored*\n'
-        f'Poll interval: {config.poll_interval:g}s'
-    )
+
+def settings_arguments(config: Config) -> tuple[str, int, str, float]:
+    return (config.host, config.port, config.username, config.poll_interval)
+
+
+def log_settings(config: Config) -> None:
+    log.info(SETTINGS_BANNER, *settings_arguments(config))
 
 
 # ---------------------------------------------------------------------------
@@ -1172,6 +1179,25 @@ def poll_forever(
 _CONTROL_CHARACTERS = re.compile(r'[\x00-\x08\x0a-\x1f\x7f-\x9f\u2028\u2029]')
 
 
+def escape_control_characters(text: str) -> str:
+    """Write every control character out, e.g. a line break as backslash-n."""
+
+    return _CONTROL_CHARACTERS.sub(lambda match: repr(match.group())[1:-1], text)
+
+
+def printable(text: str, secrets: list[str]) -> str:
+    """One line of text, safe to print: censored, then escaped, then censored
+    again for the escaped form of each secret -- what the log filter does for
+    an argument. For the output of the healthcheck and the test tools, which
+    print rather than log.
+    """
+
+    every_form = secrets_for_redaction(
+        [*secrets, *(escape_control_characters(secret) for secret in secrets)]
+    )
+    return redact(escape_control_characters(redact(text, every_form)), every_form)
+
+
 class RedactingFilter(logging.Filter):
     """Keeps secrets and forged lines out of the exporter's log.
 
@@ -1215,9 +1241,7 @@ class RedactingFilter(logging.Filter):
     def escape(value: object) -> object:
         if isinstance(value, (int, float)):
             return value
-        return _CONTROL_CHARACTERS.sub(
-            lambda match: repr(match.group())[1:-1], str(value)
-        )
+        return escape_control_characters(str(value))
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Censor each argument before escaping it -- escaping would change a
@@ -1292,7 +1316,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(config.log_level, secrets=secrets)
     for flag in overridden_flags(args, os.environ):
         log.warning('Ignoring %s: environment variables take precedence', flag)
-    log.info(describe_settings(config))
+    log_settings(config)
 
     handle_termination()
     try:
