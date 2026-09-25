@@ -946,12 +946,17 @@ class Teamspeak3MetricService:
         client_factory: ClientFactory = default_client_factory,
         clock: Callable[[], float] = time.time,
         secrets: list[str] | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
+        """``clock`` gives Unix time for the timestamp gauges; ``monotonic``
+        measures the poll duration, which a stepped wall clock (NTP, an
+        administrator) must not distort."""
         self.config = config
         self.gauges = gauges
         self.exporter_metrics = exporter_metrics
         self.client_factory = client_factory
         self.clock = clock
+        self.monotonic = monotonic
         self.known_virtualservers: set[str] = set()
         self._warned_missing: set[tuple[str, str]] = set()
         # Label values come from the server and are untrusted, like its log
@@ -968,6 +973,7 @@ class Teamspeak3MetricService:
     def poll(self) -> PollResult:
         metrics = self.exporter_metrics
         started = self.clock()
+        started_monotonic = self.monotonic()
         metrics.last_poll_timestamp.set(started)
         try:
             result = self._poll()
@@ -988,7 +994,7 @@ class Teamspeak3MetricService:
             metrics.poll_errors.labels(reason='unexpected').inc()
             result = PollResult.FAILED
 
-        metrics.poll_duration.set(max(self.clock() - started, 0.0))
+        metrics.poll_duration.set(self.monotonic() - started_monotonic)
         metrics.poll_success.set(1 if result is PollResult.OK else 0)
         if result is PollResult.OK:
             metrics.last_successful_poll_timestamp.set(started)

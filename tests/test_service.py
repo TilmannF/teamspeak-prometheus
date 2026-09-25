@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import signal
+import time
 
 import pytest
 from prometheus_client import CollectorRegistry, generate_latest
@@ -550,3 +551,60 @@ def test_the_configured_password_is_always_a_secret():
     service.poll()
 
     assert CONFIG.password not in generate_latest(registry).decode()
+
+
+# -- poll duration: elapsed time, not wall-clock difference --------------------
+
+
+class SteppedClocks:
+    """A wall clock that NTP steps during the poll, and a monotonic clock that
+    just advances by the real elapsed time."""
+
+    def __init__(self, step: float, elapsed: float = 1.5):
+        self.wall = 1_700_000_000.0
+        self.monotonic = 500.0
+        self.step = step
+        self.elapsed = elapsed
+
+    def factory(self, client: FakeTs3Client):
+        def make(host: str, port: int) -> FakeTs3Client:
+            self.wall += self.step  # the clock is stepped mid-poll
+            self.wall += self.elapsed
+            self.monotonic += self.elapsed
+            return client
+
+        return make
+
+
+@pytest.mark.parametrize('step', [-3600.0, -1.0, 0.0, 3600.0])
+def test_the_poll_duration_ignores_a_stepped_wall_clock(step):
+    clocks = SteppedClocks(step)
+    registry = CollectorRegistry()
+    started = clocks.wall
+    service = app.Teamspeak3MetricService(
+        CONFIG,
+        app.build_gauges(registry),
+        app.build_exporter_metrics(registry),
+        clocks.factory(FakeTs3Client()),
+        clock=lambda: clocks.wall,
+        monotonic=lambda: clocks.monotonic,
+    )
+
+    service.poll()
+
+    def value(name: str) -> float | None:
+        return registry.get_sample_value(name)
+
+    assert value('teamspeak_exporter_poll_duration_seconds') == clocks.elapsed
+    # timestamps stay Unix time from the wall clock, taken at the start
+    assert value('teamspeak_exporter_last_poll_timestamp_seconds') == started
+    assert value('teamspeak_exporter_last_successful_poll_timestamp_seconds') == started
+
+
+def test_the_service_uses_the_monotonic_clock_by_default():
+    import inspect
+
+    parameters = inspect.signature(app.Teamspeak3MetricService).parameters
+
+    assert parameters['monotonic'].default is time.monotonic
+    assert parameters['clock'].default is time.time
