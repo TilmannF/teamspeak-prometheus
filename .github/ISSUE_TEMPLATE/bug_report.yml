@@ -1,0 +1,46 @@
+name: Bug report
+description: Something the exporter does is wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: input
+    id: how-run
+    attributes:
+      label: How are you running it
+      description: Docker image tag (e.g. `tilmannf/teamspeak-prometheus:1.0.0`), or Python version + commit if run from source
+      placeholder: tilmannf/teamspeak-prometheus:1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: ts3-version
+    attributes:
+      label: TeamSpeak server version
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant /metrics output or console output
+      description: >-
+        Paste the smallest relevant excerpt. **Redact your ServerQuery password
+        first** — it must never appear in an issue, even a fixture one.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: password-redacted
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have redacted my ServerQuery password from everything pasted above
+          required: true

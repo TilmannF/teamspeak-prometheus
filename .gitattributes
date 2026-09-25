@@ -1,0 +1,11 @@
+# README.md was committed as UTF-16LE with CRLF, which made it unreadable to
+# grep, diffs, and AI agents. Normalize line endings so that cannot recur.
+* text=auto eol=lf
+
+*.py    text
+*.md    text
+*.json  text
+*.yml   text
+*.yaml  text
+Dockerfile text
+Makefile   text

@@ -1,0 +1,143 @@
+name: Release
+
+# Publishing happens only for a pushed vX.Y.Z tag, and only after
+# .github/scripts/validate-release-tag.sh accepted it (see docs/releasing.md).
+# A manual run (workflow_dispatch) is a separate, read-only job that only
+# builds: it proves the multi-arch build but never logs in, pushes, attests, or
+# creates a release -- and never holds a write token. To retry a failed
+# release, re-run the original tag-push run -- that is validated again.
+# tests/test_release.py enforces all of this.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build only (manual run)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+
+  release:
+    name: build, push, attest, release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # secrets.* cannot appear directly in `if:`, so read it into env here
+      # and expose a plain step output that later `if:` conditions can key on.
+      # `if: secrets.DOCKERHUB_TOKEN != ''` silently evaluates false and the
+      # push never happens.
+      - name: Check Docker Hub credentials
+        id: dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ghcr.io requires a lowercase repository name; github.repository keeps
+      # the owner's case ("TilmannF/..."). Computed once so the pushed image
+      # and the attested subject-name below can't drift apart.
+      - name: Resolve lowercase GHCR image name
+        id: ghcr
+        run: echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      # The tag trigger 'v*.*.*' also matches tags that are not plain versions,
+      # and nothing ties a tag to the code: __version__ (what
+      # teamspeak_exporter_build_info reports) could still say the previous
+      # version. The script fails on both, before anything is published.
+      - name: Validate release tag
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: .github/scripts/validate-release-tag.sh "$TAG"
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Logins only when publishing: a manual build-only run never touches
+      # registry credentials.
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name == 'push' && steps.dockerhub.outputs.enabled == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # When Docker Hub credentials are absent, the second image line
+      # resolves to an empty entry and metadata-action drops it -- no
+      # docker.io tag is produced, so the push step below never attempts a
+      # push there and the missing login above is harmless.
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v6.2.0
+        id: meta
+        with:
+          images: |
+            ${{ steps.ghcr.outputs.image }}
+            ${{ steps.dockerhub.outputs.enabled == 'true' && 'docker.io/tilmannf/teamspeak-prometheus' || '' }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event_name == 'push'
+        with:
+          subject-name: ${{ steps.ghcr.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        if: github.event_name == 'push'
+        with:
+          generate_release_notes: true

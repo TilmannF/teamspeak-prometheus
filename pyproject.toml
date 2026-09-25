@@ -1,0 +1,21 @@
+# Tool configuration only. Runtime dependencies stay in requirements.txt so the
+# Dockerfile keeps working unchanged; dev dependencies live in
+# requirements-dev.txt.
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+# The existing code uses single quotes. Keep it that way.
+quote-style = "single"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "smoke: end-to-end tests that open sockets or spawn subprocesses (excluded from `make test`)",
+]

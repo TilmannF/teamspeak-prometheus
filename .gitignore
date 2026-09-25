@@ -1,0 +1,32 @@
+### Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+### Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+### OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+### JetBrains IDE project files
+.idea/
+*.iml
+
+### Local environment
+.env
+.env.*
+*.log
+
+### Local workflow artifacts (agent session state, see AGENTS.md)
+.work/
+
+### Local agent tool settings
+.claude/
