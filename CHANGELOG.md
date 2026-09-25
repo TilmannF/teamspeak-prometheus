@@ -96,6 +96,10 @@ It is the state as shipped: what a user gets if they pull this tag today.
   minutes — so a server that trickles data or never ends a line cannot stall
   the exporter, while a large throttled host is still read completely.
 - Stopped virtualservers are skipped instead of failing every poll.
+- What a TeamSpeak server sends is bounded in size: at most 64 MiB per session,
+  only the 41 contract values kept per virtualserver until a poll is recorded,
+  and virtualserver names cut to 256 characters, so a hostile server cannot
+  exhaust the exporter's or Prometheus' memory.
 - A poll records nothing until its whole session has completed: one that fails
   part-way no longer leaves some virtualservers updated and others stale, and a
   scrape during a long poll no longer sees a mixture.

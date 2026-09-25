@@ -14,6 +14,9 @@ from teamspeak_prometheus.logs import log
 METRICS_PREFIX = 'teamspeak_'
 EXPORTER_PREFIX = 'teamspeak_exporter_'
 VIRTUALSERVER_LABEL = 'virtualserver_name'
+# Longest label value exported. Real virtualserver names are short; this only
+# stops a server from making every series megabytes large.
+MAX_LABEL_LENGTH = 256
 
 ERROR_REASONS = ('connection', 'login', 'query', 'unexpected')
 
@@ -163,6 +166,37 @@ def update_gauges(
             continue
         gauge.labels(**{VIRTUALSERVER_LABEL: virtualserver_name}).set(value)
     return skipped
+
+
+def contract_values(serverinfo: Mapping[str, object]) -> dict[str, float]:
+    """The contract fields of a ``serverinfo`` response that are numbers.
+
+    What a poll keeps of a response until it records it: at most 41 floats,
+    whatever else and however much the server sent. A missing or non-numeric
+    field is simply absent; ``update_gauges`` then reports it as skipped.
+    """
+
+    values = {}
+    for teamspeak_metric_name in METRICS_NAMES:
+        try:
+            values[teamspeak_metric_name] = float(serverinfo[teamspeak_metric_name])  # type: ignore[arg-type]
+        except (KeyError, TypeError, ValueError):
+            continue
+    return values
+
+
+def label_value(text: str) -> str:
+    """``text`` as a label value, cut to ``MAX_LABEL_LENGTH`` characters.
+
+    A label value is stored with every series, in the exporter and for good in
+    Prometheus; the server decides how long a virtualserver name is. Cut with a
+    trailing ``…``. Censor before cutting: cutting first could leave part of a
+    password behind.
+    """
+
+    if len(text) <= MAX_LABEL_LENGTH:
+        return text
+    return text[: MAX_LABEL_LENGTH - 1] + '…'
 
 
 def _remove_series(metric: Gauge, virtualserver_name: str) -> None:

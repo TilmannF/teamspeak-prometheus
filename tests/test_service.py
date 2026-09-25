@@ -13,6 +13,7 @@ from teamspeak_prometheus.errors import ServerQueryError
 from teamspeak_prometheus.loop import MAX_BACKOFF_IN_SECONDS, next_delay, poll_forever
 from teamspeak_prometheus.main import Shutdown, handle_termination
 from teamspeak_prometheus.metrics import (
+    MAX_LABEL_LENGTH,
     METRICS_NAMES,
     build_exporter_metrics,
     build_gauges,
@@ -721,3 +722,68 @@ def test_the_poll_after_a_failed_one_writes_everything_new():
     assert setup.service.poll() is PollResult.OK
 
     assert uptimes(setup) == {name: value + 5 for name, value in BEFORE.items()}
+
+
+# -- the staged snapshot stays small whatever the server sends --------------------
+
+
+def test_staging_keeps_only_the_contract_values_not_the_responses():
+    import tracemalloc
+
+    from teamspeak_prometheus.serverquery import MAX_LINE_BYTES, ServerQueryClient
+    from tests.fakes import FakeConnection
+
+    count = 40
+    ok = b'error id=0 msg=ok\n\r'
+    pad = b'x' * (MAX_LINE_BYTES - 200)
+    listed = b'|'.join(
+        b'virtualserver_id=%d virtualserver_status=online' % sid
+        for sid in range(1, count + 1)
+    )
+    replies = [b'TS3\n\rW\n\r', ok, listed + b'\n\r' + ok]
+    for sid in range(1, count + 1):
+        replies += [
+            ok,
+            b'virtualserver_name=s%d virtualserver_padding=' % sid + pad + b'\n\r' + ok,
+        ]
+    setup = Setup()
+    client = ServerQueryClient(FakeConnection(*replies))
+    client.login('serveradmin', 'x')
+
+    tracemalloc.start()
+    try:
+        session = setup.service._read(client)
+        held, _ = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert len(session.readings) == count
+    assert held < 1024 * 1024  # 40 MiB were received; well under 1 MiB is kept
+
+
+def test_a_long_name_is_cut_to_the_label_limit():
+    setup = Setup(servers=[{'virtualserver_id': 1, 'virtualserver_name': 'n' * 5_000}])
+
+    setup.service.poll()
+
+    (label,) = [
+        sample.labels['virtualserver_name']
+        for metric in setup.registry.collect()
+        if metric.name == 'teamspeak_virtualserver_uptime'
+        for sample in metric.samples
+    ]
+    assert len(label) == MAX_LABEL_LENGTH
+    assert label.endswith('…')
+
+
+def test_a_password_across_the_cut_is_censored_before_cutting():
+    # cutting first would leave the password's first half in the label
+    name = 'n' * (MAX_LABEL_LENGTH - 4) + CONFIG.password
+    setup = Setup(servers=[{'virtualserver_id': 1, 'virtualserver_name': name}])
+
+    setup.service.poll()
+
+    exposition = generate_latest(setup.registry).decode()
+    # censored, then cut: the marker is cut, the password is gone entirely
+    assert 'n' * (MAX_LABEL_LENGTH - 4) + '*ce…"' in exposition
+    assert 'secr' not in exposition

@@ -29,6 +29,10 @@ MAX_SESSION_TIMEOUT_IN_SECONDS = 900.0
 # Longest response line accepted. A real serverinfo line is about 4 KiB and a
 # serverlist line about 300 bytes per virtualserver.
 MAX_LINE_BYTES = 1024 * 1024
+# Everything one session may receive. About 4 KiB of serverinfo per
+# virtualserver makes this some 15,000 of them -- far beyond a real host -- and
+# bounds the memory a hostile server can make the exporter spend per poll.
+MAX_SESSION_BYTES = 64 * 1024 * 1024
 
 # TeamSpeak throttles query clients that are not on its allowlist (default: 10
 # commands per 3 seconds) and answers ``error id=524``. The exporter waits as
@@ -73,6 +77,7 @@ class ServerQueryClient:
         self._started = clock()
         self._deadline = self._started + timeout
         self._buffer = b''
+        self._received = 0
         # The server greets with two lines: ``TS3`` and a welcome text. A server
         # that has banned this IP (flooding, failed logins) or reached its
         # per-IP connection limit closes the connection without a greeting.
@@ -205,6 +210,12 @@ class ServerQueryClient:
             chunk = self._connection.recv(4096)
             if not chunk:
                 raise ConnectionError('ServerQuery closed the connection')
+            self._received += len(chunk)
+            if self._received > MAX_SESSION_BYTES:
+                raise ConnectionError(
+                    f'ServerQuery sent more than {MAX_SESSION_BYTES} bytes '
+                    'in one session'
+                )
             self._buffer += chunk
         line, _, self._buffer = self._buffer.partition(LINE_TERMINATOR)
         return line.decode('utf-8', errors='replace')

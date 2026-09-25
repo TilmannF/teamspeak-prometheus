@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from teamspeak_prometheus import __version__
-from teamspeak_prometheus.metrics import ERROR_REASONS, METRICS_NAMES, update_gauges
+from teamspeak_prometheus.metrics import (
+    ERROR_REASONS,
+    MAX_LABEL_LENGTH,
+    METRICS_NAMES,
+    contract_values,
+    label_value,
+    update_gauges,
+)
 
 
 def test_every_documented_metric_gets_a_gauge(gauges):
@@ -111,3 +118,33 @@ def test_every_error_reason_is_exported_from_the_start(registry, exporter_metric
 
 def _values(value: int = 0) -> dict[str, object]:
     return {metric: value for metric in METRICS_NAMES}
+
+
+# -- label values: a bounded length ----------------------------------------------
+
+
+def test_a_normal_name_is_a_label_as_it_is():
+    assert label_value('Zweiter Server') == 'Zweiter Server'
+
+
+def test_a_name_at_the_limit_is_kept_and_one_beyond_is_cut():
+    at_limit = 'x' * MAX_LABEL_LENGTH
+
+    assert label_value(at_limit) == at_limit
+    cut = label_value(at_limit + 'y')
+    assert len(cut) == MAX_LABEL_LENGTH
+    assert cut.endswith('…')
+
+
+def test_contract_values_keep_only_the_41_numbers():
+    serverinfo = {
+        'virtualserver_name': 'x',
+        'virtualserver_padding': 'p' * 100_000,
+        'virtualserver_uptime': '42',
+        'virtualserver_total_ping': 'n/a',
+    }
+
+    values = contract_values(serverinfo)
+
+    assert values == {'virtualserver_uptime': 42.0}
+    assert all(isinstance(v, float) for v in values.values())

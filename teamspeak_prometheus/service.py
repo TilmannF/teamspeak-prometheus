@@ -16,6 +16,8 @@ from teamspeak_prometheus.metrics import (
     VIRTUALSERVER_LABEL,
     ExporterMetrics,
     _remove_series,
+    contract_values,
+    label_value,
     update_gauges,
 )
 from teamspeak_prometheus.redaction import redact, secrets_for_redaction
@@ -38,8 +40,8 @@ class _Session:
 
     servers: list[dict[str, str | None]]
     result: PollResult = PollResult.OK
-    # (label name, serverinfo) of each virtualserver read
-    readings: list[tuple[str, dict[str, str | None]]] = field(default_factory=list)
+    # (label name, contract values) of each virtualserver read
+    readings: list[tuple[str, dict[str, float]]] = field(default_factory=list)
     # label name -> the ids of the virtualservers carrying it
     owners: dict[str, list[str]] = field(default_factory=dict)
     # virtualserver id -> status, for those serverlist reports not online
@@ -156,15 +158,20 @@ class Teamspeak3MetricService:
                 self.exporter_metrics.poll_errors.labels(reason='query').inc()
                 session.result = PollResult.PARTIAL
                 continue
-            name = redact(
-                str(
-                    serverinfo.get(VIRTUALSERVER_LABEL)
-                    or server.get(VIRTUALSERVER_LABEL)
-                    or f'virtualserver {virtualserver_id}'
-                ),
-                self._secrets,
+            # Censor first, then cut: cutting first could keep half a password.
+            name = label_value(
+                redact(
+                    str(
+                        serverinfo.get(VIRTUALSERVER_LABEL)
+                        or server.get(VIRTUALSERVER_LABEL)
+                        or f'virtualserver {virtualserver_id}'
+                    ),
+                    self._secrets,
+                )
             )
-            session.readings.append((name, serverinfo))
+            # Only the 41 numbers are kept until the session completes, not the
+            # response: a server cannot make the staged snapshot large.
+            session.readings.append((name, contract_values(serverinfo)))
             session.owners.setdefault(name, []).append(str(virtualserver_id))
         return session
 

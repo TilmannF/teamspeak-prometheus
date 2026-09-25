@@ -949,3 +949,19 @@ def test_an_empty_variable_stops_the_exporter_with_a_clear_error(variable):
     assert result.returncode == 2
     assert f'{variable} (--' in result.stderr
     assert 'must not be empty' in result.stderr
+
+
+def test_a_huge_virtualserver_name_is_cut_in_the_metrics():
+    with FakeTs3Server(password=PASSWORD, names=['n' * 5_000]) as server:
+        _, body = scrape_app(
+            {
+                'TEAMSPEAK_HOST': server.host,
+                'TEAMSPEAK_PORT': str(server.port),
+                'TEAMSPEAK_PASSWORD': PASSWORD,
+            },
+            re.compile(r'^teamspeak_exporter_poll_success 1\.0', re.M),
+        )
+
+    labels = set(re.findall(r'virtualserver_name="([^"]*)"', body))
+    assert 'n' * 255 + '…' in labels
+    assert max(len(label) for label in labels) == 256

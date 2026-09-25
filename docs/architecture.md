@@ -119,9 +119,22 @@ non-allowlisted host needs about 0.6s per virtualserver, so with a fixed 60s a
 host of 150 ran out part-way — every poll, at the same place, so the ones at
 the end were never read. The cap keeps a hostile server from buying hours by
 listing thousands.
-A flood wait that would cross the deadline is not slept. Lines longer than 1 MiB
-(`MAX_LINE_BYTES`) are rejected. An `error` trailer without a numeric id is a
-protocol error, not success.
+A flood wait that would cross the deadline is not slept. An `error` trailer
+without a numeric id is a protocol error, not success.
+
+What the server sends is bounded in size as well as in time, so a hostile
+server cannot exhaust the exporter's memory:
+
+| Limit | Value | Guards against |
+| --- | --- | --- |
+| `MAX_LINE_BYTES` | 1 MiB per response line | a line that never ends |
+| `MAX_SESSION_BYTES` | 64 MiB per session | many large responses; ~15,000 real virtualservers fit |
+| staged snapshot | 41 floats + a name per virtualserver | responses held until the session completes |
+| `MAX_LABEL_LENGTH` | 256 characters per `virtualserver_name` | a name making every series, here and in Prometheus, huge |
+
+Exceeding a byte limit ends the session like a timeout (`reason="connection"`,
+previous snapshot intact). A longer name is cut and ends in `…` — after
+censoring, so a cut cannot leave part of a password behind.
 
 ## Error behavior
 
@@ -142,7 +155,8 @@ bind. Everything else is logged, counted, and retried:
 | `serverinfo` field missing or not numeric | that series skipped and removed, warning logged once | `teamspeak_exporter_missing_fields` |
 | Anything else | logged with traceback, poll fails, backoff | `reason="unexpected"` |
 
-A poll reads every virtualserver first and records nothing until its session
+A poll reads every virtualserver first — keeping only the 41 contract values
+and the name of each, not the responses — and records nothing until its session
 has completed (`_read`, then `_apply`). A poll that **fails** part-way — the
 connection drops after some virtualservers were read, the session budget runs
 out — therefore records none of what it read: the previous snapshot stays

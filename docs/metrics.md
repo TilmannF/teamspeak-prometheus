@@ -84,7 +84,8 @@ is a state of the host, not an exporter error: it does not affect
 `teamspeak_exporter_poll_success`.
 
 A virtualserver name that contains the ServerQuery password is exported with
-the password replaced by `*censored*`.
+the password replaced by `*censored*`. A name longer than 256 characters is
+cut to 256, ending in `…`; real TeamSpeak names are far shorter.
 
 Virtualservers with identical names write the same series; only the last one
 read is exported, and the exporter logs a warning. Give them distinct names.

@@ -13,6 +13,7 @@ from teamspeak_prometheus.serverquery import (
     FLOOD_RETRIES,
     MAX_FLOOD_WAIT_IN_SECONDS,
     MAX_LINE_BYTES,
+    MAX_SESSION_BYTES,
     MAX_SESSION_TIMEOUT_IN_SECONDS,
     PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS,
     POLL_TIMEOUT_IN_SECONDS,
@@ -435,3 +436,37 @@ def test_a_trickling_server_is_still_cut_off_after_the_serverlist():
 
     with pytest.raises(TimeoutError, match='70s'):
         query.use(1)
+
+
+# -- a byte budget for everything a session receives ----------------------------
+
+
+def test_a_session_that_sends_too_much_is_cut_off():
+    # complete lines, each well under the line limit, without end
+    line = b'notifytextmessage msg=' + b'x' * 60_000 + b'\n\r'
+    connection = FakeConnection(BANNER, endless=itertools.repeat(line))
+    query = app_client(connection)
+
+    with pytest.raises(ConnectionError, match='more than'):
+        query.serverlist()
+
+    received = connection.recv_calls * len(line)
+    assert received <= MAX_SESSION_BYTES + 2 * len(line)
+
+
+def test_a_large_real_host_stays_far_inside_the_byte_budget():
+    serverinfo = (FIXTURES / 'ts3-3.13.8-serverinfo.bin').read_bytes()
+    count = 1_000
+    replies = [BANNER, OK, serverlist_reply(count)] + [OK, serverinfo] * count
+    query = app_client(FakeConnection(*replies))
+    query.login('serveradmin', 'x')
+
+    for server in query.serverlist():
+        query.use(server['virtualserver_id'])
+        query.serverinfo()
+
+    assert count * len(serverinfo) < MAX_SESSION_BYTES / 10
+
+
+def app_client(connection: FakeConnection) -> ServerQueryClient:
+    return ServerQueryClient(connection)
