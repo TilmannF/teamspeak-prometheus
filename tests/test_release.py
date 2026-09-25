@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import app
+from teamspeak_prometheus import __version__
 
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / '.github' / 'scripts' / 'validate-release-tag.sh'
@@ -26,23 +26,26 @@ SEMVER = re.compile(r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$')
 
 
 def test_the_version_is_plain_semver():
-    assert SEMVER.match(app.__version__)
+    assert SEMVER.match(__version__)
 
 
 def test_the_changelog_has_a_section_for_the_version():
     changelog = (ROOT / 'CHANGELOG.md').read_text()
 
-    assert f'## [{app.__version__}]' in changelog
+    assert f'## [{__version__}]' in changelog
 
 
 # -- the release script -------------------------------------------------------
 
 
 def validate(tmp_path: Path, tag: str, version: str = '1.2.3', section: str = '1.2.3'):
-    (tmp_path / 'app.py').write_text(f"__version__ = '{version}'\n")
+    (tmp_path / 'teamspeak_prometheus').mkdir()
+    (tmp_path / 'teamspeak_prometheus' / '__init__.py').write_text(
+        f"__version__ = '{version}'\n"
+    )
     (tmp_path / 'CHANGELOG.md').write_text(f'# Changelog\n\n## [{section}]\n')
     return subprocess.run(
-        ['bash', str(SCRIPT), tag, str(tmp_path / 'app.py')],
+        ['bash', str(SCRIPT), tag, str(tmp_path)],
         capture_output=True,
         text=True,
         timeout=10,
@@ -99,11 +102,14 @@ def test_a_version_without_a_changelog_section_fails(tmp_path):
 
 @pytest.mark.smoke
 def test_a_missing_version_fails(tmp_path):
-    (tmp_path / 'app.py').write_text('print("no version here")\n')
+    (tmp_path / 'teamspeak_prometheus').mkdir()
+    (tmp_path / 'teamspeak_prometheus' / '__init__.py').write_text(
+        '# no version here\n'
+    )
     (tmp_path / 'CHANGELOG.md').write_text('## [1.2.3]\n')
 
     result = subprocess.run(
-        ['bash', str(SCRIPT), 'v1.2.3', str(tmp_path / 'app.py')],
+        ['bash', str(SCRIPT), 'v1.2.3', str(tmp_path)],
         capture_output=True,
         text=True,
         timeout=10,
@@ -116,7 +122,7 @@ def test_a_missing_version_fails(tmp_path):
 @pytest.mark.smoke
 def test_the_real_repository_validates_for_its_own_version():
     result = subprocess.run(
-        ['bash', str(SCRIPT), f'v{app.__version__}', str(ROOT / 'app.py')],
+        ['bash', str(SCRIPT), f'v{__version__}', str(ROOT)],
         capture_output=True,
         text=True,
         timeout=10,

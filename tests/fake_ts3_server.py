@@ -15,13 +15,13 @@ import threading
 import time
 from collections import deque
 
-from app import (
-    METRICS_NAMES,
+from teamspeak_prometheus.cli import (
     RememberEveryValue,
     SafeArgumentParser,
     given_values,
-    printable,
 )
+from teamspeak_prometheus.metrics import METRICS_NAMES
+from teamspeak_prometheus.redaction import printable
 from tests.serverquery import (
     BANNER,
     LINE_TERMINATOR,

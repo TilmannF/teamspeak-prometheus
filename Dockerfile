@@ -3,6 +3,7 @@ FROM python:3.14-alpine
 WORKDIR /app
 
 COPY requirements.txt app.py healthcheck.py ./
+COPY teamspeak_prometheus ./teamspeak_prometheus
 
 RUN pip install --no-cache-dir -r requirements.txt \
   && adduser -D -H -u 10001 exporter

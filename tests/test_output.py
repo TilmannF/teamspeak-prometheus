@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import app
+from teamspeak_prometheus.redaction import printable
 
 REPOSITORY = Path(__file__).parent.parent
 LOG_METHODS = {'debug', 'info', 'warning', 'error', 'exception', 'critical', 'log'}
@@ -31,7 +31,7 @@ def python_files() -> list[Path]:
 
 
 def is_logger(node: ast.expr) -> bool:
-    """``log``, ``app.log``, ``logging``, ``logger``, ``self.log``."""
+    """``log``, ``log``, ``logging``, ``logger``, ``self.log``."""
 
     if isinstance(node, ast.Name):
         return node.id in LOGGERS
@@ -149,7 +149,7 @@ def test_the_poll_error_helper_is_only_given_literal_templates():
         "log.info('x ' + y)",
         "log.info('x %s' % y)",
         'log.warning(describe(y))',
-        'app.log.error(message)',
+        'log.error(message)',
         "logging.log(20, f'{y}')",
     ],
 )
@@ -183,7 +183,7 @@ def test_the_scan_allows_literal_and_forwarded_templates(tmp_path, source):
     ['listening on x\n2026 CRITICAL forged', 'a\r\nb', 'esc\x1b[2Kx', 'sep\u2028x'],
 )
 def test_a_printed_line_is_always_one_line(text):
-    line = app.printable(text, [])
+    line = printable(text, [])
 
     assert len(line.splitlines()) == 1
     assert '\x1b' not in line
@@ -192,6 +192,6 @@ def test_a_printed_line_is_always_one_line(text):
 def test_a_printed_line_is_censored_in_any_form():
     secret = 'pass\nword'
 
-    line = app.printable(f'error: {secret} and pass\\nword', [secret])
+    line = printable(f'error: {secret} and pass\\nword', [secret])
 
     assert 'pass' not in line

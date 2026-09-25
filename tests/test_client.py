@@ -7,7 +7,19 @@ from pathlib import Path
 
 import pytest
 
-import app
+from teamspeak_prometheus.errors import LoginFailed, ServerQueryError
+from teamspeak_prometheus.metrics import METRICS_NAMES
+from teamspeak_prometheus.serverquery import (
+    FLOOD_RETRIES,
+    MAX_FLOOD_WAIT_IN_SECONDS,
+    MAX_LINE_BYTES,
+    MAX_SESSION_TIMEOUT_IN_SECONDS,
+    PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS,
+    POLL_TIMEOUT_IN_SECONDS,
+    SERVERQUERY_TIMEOUT_IN_SECONDS,
+    ServerQueryClient,
+)
+from teamspeak_prometheus.wire import escape, unescape
 from tests.fakes import FakeClock, FakeConnection
 from tests.serverquery import escape as reference_escape
 
@@ -26,12 +38,12 @@ def flood_error(seconds: int) -> bytes:
 def client(*replies: bytes, sleeps: list[float] | None = None):
     connection = FakeConnection(BANNER, *replies)
     record = sleeps if sleeps is not None else []
-    return app.ServerQueryClient(connection, sleep=record.append), connection
+    return ServerQueryClient(connection, sleep=record.append), connection
 
 
 def test_the_real_ts3_banner_is_accepted():
     connection = FakeConnection((FIXTURES / 'ts3-3.13.8-banner.bin').read_bytes(), OK)
-    query = app.ServerQueryClient(connection)
+    query = ServerQueryClient(connection)
 
     query.use(1)
 
@@ -40,12 +52,12 @@ def test_the_real_ts3_banner_is_accepted():
 
 def test_a_server_that_is_not_serverquery_is_rejected():
     with pytest.raises(ConnectionError, match='not a TeamSpeak 3'):
-        app.ServerQueryClient(FakeConnection(b'SSH-2.0-OpenSSH\n\r'))
+        ServerQueryClient(FakeConnection(b'SSH-2.0-OpenSSH\n\r'))
 
 
 def test_a_silent_close_before_the_greeting_hints_at_a_ban():
     with pytest.raises(ConnectionError, match='banned'):
-        app.ServerQueryClient(FakeConnection())
+        ServerQueryClient(FakeConnection())
 
 
 def test_login_sends_escaped_credentials():
@@ -61,7 +73,7 @@ def test_login_sends_escaped_credentials():
 def test_a_rejected_login_raises_login_failed_without_the_password():
     query, _ = client(b'error id=520 msg=invalid\\sloginname\\sor\\spassword\n\r')
 
-    with pytest.raises(app.LoginFailed) as caught:
+    with pytest.raises(LoginFailed) as caught:
         query.login('serveradmin', 'hunter2')
 
     assert caught.value.error_id == 520
@@ -70,12 +82,12 @@ def test_a_rejected_login_raises_login_failed_without_the_password():
 
 def test_a_login_still_flooded_after_all_retries_is_not_a_rejected_login():
     flood = flood_error(1)
-    query, _ = client(*[flood] * (app.FLOOD_RETRIES + 1))
+    query, _ = client(*[flood] * (FLOOD_RETRIES + 1))
 
-    with pytest.raises(app.ServerQueryError) as caught:
+    with pytest.raises(ServerQueryError) as caught:
         query.login('serveradmin', 'hunter2')
 
-    assert not isinstance(caught.value, app.LoginFailed)
+    assert not isinstance(caught.value, LoginFailed)
     assert caught.value.error_id == 524
 
 
@@ -89,10 +101,10 @@ def test_a_login_still_flooded_after_all_retries_is_not_a_rejected_login():
 def test_other_login_errors_are_not_rejected_logins(error: bytes):
     query, _ = client(error)
 
-    with pytest.raises(app.ServerQueryError) as caught:
+    with pytest.raises(ServerQueryError) as caught:
         query.login('serveradmin', 'hunter2')
 
-    assert not isinstance(caught.value, app.LoginFailed)
+    assert not isinstance(caught.value, LoginFailed)
 
 
 def test_the_real_serverlist_response_is_parsed():
@@ -110,9 +122,9 @@ def test_the_real_serverinfo_response_contains_every_contract_field():
 
     info = query.serverinfo()
 
-    missing = [name for name in app.METRICS_NAMES if name not in info]
+    missing = [name for name in METRICS_NAMES if name not in info]
     assert missing == []
-    for name in app.METRICS_NAMES:
+    for name in METRICS_NAMES:
         float(info[name])
 
 
@@ -141,7 +153,7 @@ def test_notifications_between_commands_are_ignored():
 def test_an_error_response_raises_with_its_id_and_message():
     query, _ = client(b'error id=1024 msg=invalid\\sserverID\n\r')
 
-    with pytest.raises(app.ServerQueryError) as caught:
+    with pytest.raises(ServerQueryError) as caught:
         query.use(99)
 
     assert caught.value.error_id == 1024
@@ -165,13 +177,13 @@ def test_flooding_waits_as_told_and_retries():
 def test_flooding_gives_up_after_the_retry_budget():
     flood = flood_error(1)
     sleeps: list[float] = []
-    query, _ = client(*[flood] * (app.FLOOD_RETRIES + 1), sleeps=sleeps)
+    query, _ = client(*[flood] * (FLOOD_RETRIES + 1), sleeps=sleeps)
 
-    with pytest.raises(app.ServerQueryError) as caught:
+    with pytest.raises(ServerQueryError) as caught:
         query.serverlist()
 
     assert caught.value.error_id == 524
-    assert len(sleeps) == app.FLOOD_RETRIES
+    assert len(sleeps) == FLOOD_RETRIES
 
 
 def test_an_absurd_flood_wait_is_capped():
@@ -184,7 +196,7 @@ def test_an_absurd_flood_wait_is_capped():
 
     query.use(1)
 
-    assert sleeps == [app.MAX_FLOOD_WAIT_IN_SECONDS]
+    assert sleeps == [MAX_FLOOD_WAIT_IN_SECONDS]
 
 
 def test_a_closed_connection_raises_connection_error():
@@ -216,15 +228,15 @@ def test_close_says_quit_and_closes_the_socket():
     ],
 )
 def test_escaping_matches_the_reference_encoder(value: str):
-    assert app.escape(value) == reference_escape(value)
-    assert app.unescape(reference_escape(value)) == value
+    assert escape(value) == reference_escape(value)
+    assert unescape(reference_escape(value)) == value
 
 
 # -- a server that never finishes --------------------------------------------
 
 
 def ticking_client(connection: FakeConnection, clock: FakeClock, timeout: float = 60):
-    return app.ServerQueryClient(
+    return ServerQueryClient(
         connection, sleep=clock.sleep, clock=clock, timeout=timeout
     )
 
@@ -276,7 +288,7 @@ def test_every_read_is_bounded_by_the_per_read_timeout():
 
     query.use(1)
 
-    assert connection.timeouts == [app.SERVERQUERY_TIMEOUT_IN_SECONDS]
+    assert connection.timeouts == [SERVERQUERY_TIMEOUT_IN_SECONDS]
 
 
 def test_a_flood_wait_beyond_the_deadline_is_not_slept():
@@ -294,19 +306,19 @@ def test_a_flood_wait_beyond_the_deadline_is_not_slept():
 def test_an_overlong_line_is_rejected():
     chunk = b'x' * 65536
     connection = FakeConnection(BANNER, endless=itertools.repeat(chunk))
-    query = app.ServerQueryClient(connection)
+    query = ServerQueryClient(connection)
 
     with pytest.raises(ConnectionError, match='longer than'):
         query.serverlist()
 
-    assert connection.recv_calls <= app.MAX_LINE_BYTES // len(chunk) + 3
+    assert connection.recv_calls <= MAX_LINE_BYTES // len(chunk) + 3
 
 
 def test_a_line_at_the_size_limit_is_accepted():
-    payload = b'virtualserver_name=' + b'x' * (app.MAX_LINE_BYTES - 32)
+    payload = b'virtualserver_name=' + b'x' * (MAX_LINE_BYTES - 32)
     query, _ = client(payload + b'\n\r', OK)
 
-    assert len(query.serverlist()[0]['virtualserver_name']) == app.MAX_LINE_BYTES - 32
+    assert len(query.serverlist()[0]['virtualserver_name']) == MAX_LINE_BYTES - 32
 
 
 # -- malformed trailers -------------------------------------------------------
@@ -320,7 +332,7 @@ def test_a_line_at_the_size_limit_is_accepted():
 def test_an_error_line_without_a_numeric_id_is_not_success(trailer: bytes):
     query, _ = client(b'virtualserver_id=1\n\r', trailer)
 
-    with pytest.raises(app.ServerQueryError) as caught:
+    with pytest.raises(ServerQueryError) as caught:
         query.serverlist()
 
     assert caught.value.error_id == -1
@@ -349,10 +361,10 @@ def throttled_session(count: int, seconds_per_recv: float, status: str = 'online
     connection = FakeConnection(
         *replies, clock=clock, seconds_per_recv=seconds_per_recv
     )
-    return app.ServerQueryClient(connection, sleep=clock.sleep, clock=clock), clock
+    return ServerQueryClient(connection, sleep=clock.sleep, clock=clock), clock
 
 
-def read_all(query: app.ServerQueryClient) -> int:
+def read_all(query: ServerQueryClient) -> int:
     query.login('serveradmin', 'x')
     read = 0
     for server in query.serverlist():
@@ -367,7 +379,7 @@ def test_a_large_throttled_host_is_read_completely():
     query, clock = throttled_session(150, seconds_per_recv=0.2)
 
     assert read_all(query) == 150
-    assert clock.now > app.POLL_TIMEOUT_IN_SECONDS
+    assert clock.now > POLL_TIMEOUT_IN_SECONDS
 
 
 def test_the_budget_grows_per_online_virtualserver():
@@ -375,9 +387,7 @@ def test_the_budget_grows_per_online_virtualserver():
     query.login('serveradmin', 'x')
     query.serverlist()
 
-    clock.now = (
-        app.POLL_TIMEOUT_IN_SECONDS + 3 * app.PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS - 1
-    )
+    clock.now = POLL_TIMEOUT_IN_SECONDS + 3 * PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS - 1
     query.use(1)  # still inside the budget
 
     clock.now += 2
@@ -390,7 +400,7 @@ def test_virtualservers_that_are_not_online_add_no_budget():
     query.login('serveradmin', 'x')
     query.serverlist()
 
-    clock.now = app.POLL_TIMEOUT_IN_SECONDS + 1
+    clock.now = POLL_TIMEOUT_IN_SECONDS + 1
     with pytest.raises(TimeoutError):
         query.use(1)
 
@@ -401,11 +411,11 @@ def test_the_budget_is_capped_however_many_virtualservers_are_listed():
     query.login('serveradmin', 'x')
     query.serverlist()
 
-    clock.now = app.MAX_SESSION_TIMEOUT_IN_SECONDS - 1
+    clock.now = MAX_SESSION_TIMEOUT_IN_SECONDS - 1
     query.use(1)
 
-    clock.now = app.MAX_SESSION_TIMEOUT_IN_SECONDS + 1
-    with pytest.raises(TimeoutError, match=f'{app.MAX_SESSION_TIMEOUT_IN_SECONDS:g}s'):
+    clock.now = MAX_SESSION_TIMEOUT_IN_SECONDS + 1
+    with pytest.raises(TimeoutError, match=f'{MAX_SESSION_TIMEOUT_IN_SECONDS:g}s'):
         query.use(2)
 
 
@@ -419,7 +429,7 @@ def test_a_trickling_server_is_still_cut_off_after_the_serverlist():
         clock=clock,
         seconds_per_recv=1,
     )
-    query = app.ServerQueryClient(connection, sleep=clock.sleep, clock=clock)
+    query = ServerQueryClient(connection, sleep=clock.sleep, clock=clock)
     query.login('serveradmin', 'x')
     query.serverlist()
 

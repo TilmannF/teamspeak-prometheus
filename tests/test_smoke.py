@@ -18,8 +18,10 @@ import time
 import pytest
 import requests
 
-import app
-import healthcheck
+from teamspeak_prometheus import healthcheck
+from teamspeak_prometheus.metrics import METRICS_NAMES
+from teamspeak_prometheus.redaction import RedactingFilter
+from teamspeak_prometheus.serverquery import ServerQueryClient
 from tests.fake_ts3_server import FORGED_LOG_LINE, FakeTs3Server, virtualservers
 
 pytestmark = pytest.mark.smoke
@@ -136,7 +138,7 @@ def test_every_metric_family_is_exposed(exporter):
         for line in body.splitlines()
         if line.startswith('teamspeak_') and not line.startswith('teamspeak_exporter_')
     }
-    assert exposed == {'teamspeak_' + name for name in app.METRICS_NAMES}
+    assert exposed == {'teamspeak_' + name for name in METRICS_NAMES}
 
 
 def test_the_password_is_never_printed(exporter):
@@ -186,7 +188,7 @@ def test_an_unreachable_server_keeps_the_exporter_alive():
 
 def test_the_client_reads_the_fake_server_directly():
     with FakeTs3Server(password=PASSWORD) as server:
-        client = app.ServerQueryClient.connect(server.host, server.port)
+        client = ServerQueryClient.connect(server.host, server.port)
         try:
             client.login('serveradmin', PASSWORD)
             listed = client.serverlist()
@@ -196,7 +198,7 @@ def test_the_client_reads_the_fake_server_directly():
             client.close()
 
     assert [s['virtualserver_name'] for s in listed] == names()
-    assert all(name in info for name in app.METRICS_NAMES)
+    assert all(name in info for name in METRICS_NAMES)
 
 
 def test_the_healthcheck_probe_accepts_a_live_metrics_endpoint(exporter):
@@ -388,9 +390,7 @@ def trickling_server():
 
 
 def test_a_trickling_server_cannot_stall_a_session(trickling_server):
-    client = app.ServerQueryClient.connect(
-        '127.0.0.1', trickling_server, session_timeout=2
-    )
+    client = ServerQueryClient.connect('127.0.0.1', trickling_server, session_timeout=2)
     started = time.monotonic()
 
     with pytest.raises(TimeoutError):
@@ -871,7 +871,7 @@ def test_a_password_with_a_control_character_never_reaches_the_log(submitted):
             re.compile(r'poll_errors_total\{reason="login"\} [1-9]'),
         )
 
-    escaped = str(app.RedactingFilter.escape(submitted))
+    escaped = str(RedactingFilter.escape(submitted))
     assert submitted not in output
     assert escaped not in output
     assert 'invalid password *censored*' in output
@@ -883,9 +883,7 @@ def test_a_throttled_host_is_read_completely_past_the_base_budget():
     with FakeTs3Server(
         password=PASSWORD, virtualserver_count=20, flood_limit=10, flood_window=1
     ) as server:
-        client = app.ServerQueryClient.connect(
-            server.host, server.port, session_timeout=2
-        )
+        client = ServerQueryClient.connect(server.host, server.port, session_timeout=2)
         try:
             client.login('serveradmin', PASSWORD)
             listed = client.serverlist()

@@ -13,7 +13,21 @@ import dataclasses
 
 from prometheus_client import CollectorRegistry, start_http_server
 
-import app
+from teamspeak_prometheus.cli import (
+    RememberEveryValue,
+    SafeArgumentParser,
+    given_values,
+    parse_args,
+)
+from teamspeak_prometheus.config import (
+    DEFAULT_POLL_INTERVAL_IN_SECONDS,
+    log_settings,
+    resolve_config,
+)
+from teamspeak_prometheus.logs import configure_logging, log
+from teamspeak_prometheus.metrics import build_exporter_metrics, build_gauges
+from teamspeak_prometheus.redaction import printable, redact, secrets_for_redaction
+from teamspeak_prometheus.service import Teamspeak3MetricService, poll_forever
 from tests.fake_ts3_server import FakeTs3Server
 
 
@@ -23,15 +37,15 @@ def run(
     ts3_password: str,
     metrics_port: int,
     iterations: int | None = None,
-    interval_in_seconds: float = app.DEFAULT_POLL_INTERVAL_IN_SECONDS,
+    interval_in_seconds: float = DEFAULT_POLL_INTERVAL_IN_SECONDS,
     secrets: list[str] | None = None,
 ) -> None:
     """``secrets`` is every password given (all repeats of --ts3password);
     ``ts3_password`` is the one used."""
 
-    secrets = app.secrets_for_redaction([ts3_password, *(secrets or [])])
-    config = app.resolve_config(
-        app.parse_args(
+    secrets = secrets_for_redaction([ts3_password, *(secrets or [])])
+    config = resolve_config(
+        parse_args(
             [
                 '--ts3host',
                 ts3_host,
@@ -49,55 +63,51 @@ def run(
     # interval goes straight to the poll loop, past configuration validation;
     # the banner still shows the interval actually used.
     config = dataclasses.replace(config, poll_interval=interval_in_seconds)
-    app.configure_logging(config.log_level, secrets=secrets)
-    app.log_settings(config)
+    configure_logging(config.log_level, secrets=secrets)
+    log_settings(config)
 
     registry = CollectorRegistry()
-    gauges = app.build_gauges(registry)
-    exporter_metrics = app.build_exporter_metrics(registry)
+    gauges = build_gauges(registry)
+    exporter_metrics = build_exporter_metrics(registry)
     try:
         # Loopback only: a local test tool has no business on the network.
         start_http_server(config.metrics_port, addr='127.0.0.1', registry=registry)
     except OSError as err:
         raise SystemExit(
-            app.redact(
+            redact(
                 f'Could not listen on port {config.metrics_port} ({err}).\n'
                 'Something else is using it -- pass --metricsport to pick another.',
                 secrets,
             )
         ) from err
-    app.log.info('Started metrics endpoint on port %s', config.metrics_port)
+    log.info('Started metrics endpoint on port %s', config.metrics_port)
 
-    service = app.Teamspeak3MetricService(
-        config, gauges, exporter_metrics, secrets=secrets
-    )
-    app.poll_forever(service, config.poll_interval, iterations)
+    service = Teamspeak3MetricService(config, gauges, exporter_metrics, secrets=secrets)
+    poll_forever(service, config.poll_interval, iterations)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = app.SafeArgumentParser(
-        description=__doc__, secret_options=('--ts3password',)
-    )
+    parser = SafeArgumentParser(description=__doc__, secret_options=('--ts3password',))
     parser.add_argument('--ts3host', default='127.0.0.1')
     parser.add_argument('--ts3port', type=int, default=0, help='0 starts a fake server')
     parser.add_argument(
-        '--ts3password', default='fake-password', action=app.RememberEveryValue
+        '--ts3password', default='fake-password', action=RememberEveryValue
     )
     parser.add_argument('--metricsport', type=int, default=8000)
     parser.add_argument('--iterations', type=int, default=None)
     parser.add_argument(
-        '--interval', type=float, default=app.DEFAULT_POLL_INTERVAL_IN_SECONDS
+        '--interval', type=float, default=DEFAULT_POLL_INTERVAL_IN_SECONDS
     )
     parser.add_argument('--virtualservers', type=int, default=2)
     parser.add_argument('--flood-limit', type=int, default=None)
     parser.add_argument('--flood-window', type=float, default=3.0)
     args = parser.parse_args(argv)
-    secrets = app.secrets_for_redaction(app.given_values(args, 'ts3password'))
+    secrets = secrets_for_redaction(given_values(args, 'ts3password'))
 
     def say(text: str) -> None:
         # Everything printed is censored like the exporter's log: even a port
         # number is the password when someone picks it as one. See AGENTS.md.
-        print(app.printable(text, secrets))
+        print(printable(text, secrets))
 
     fake = None
     ts3_host, ts3_port = args.ts3host, args.ts3port

@@ -120,6 +120,23 @@ never_printed password-is-port 9400
 never_printed inline-env 9500
 never_printed metrics-port-flag "$SECRET"
 
+# The image holds the entry points, the requirements and the package's modules
+# -- no caches, tests, docs or anything else from the build context.
+contents="$(docker run --rm --entrypoint sh "$IMAGE" -c \
+  'cd /app && find . -type f | sort | tr "\n" " "')"
+expected="$(cd "$(dirname "$0")/.." && {
+  printf '%s\n' ./app.py ./healthcheck.py ./requirements.txt
+  find ./teamspeak_prometheus -name '*.py'
+} | sort | tr '\n' ' ')"
+if [[ "$contents" == "$expected" ]]; then
+  echo "ok   image contents: only the exporter"
+else
+  echo "FAIL image contents"
+  echo "  expected: $expected"
+  echo "  found:    $contents"
+  FAILED=1
+fi
+
 # stopped NAME: docker stop must finish fast with exit code 0 and a clean log.
 stopped() {
   local name="$PREFIX-$1" started elapsed code

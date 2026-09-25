@@ -13,7 +13,22 @@ import sys
 import pytest
 from prometheus_client import CollectorRegistry
 
-import app
+from teamspeak_prometheus.cli import parse_args
+from teamspeak_prometheus.config import (
+    SETTINGS_BANNER,
+    Config,
+    resolve_config,
+    settings_arguments,
+)
+from teamspeak_prometheus.errors import LoginFailed, ServerQueryError
+from teamspeak_prometheus.logs import configure_logging, log
+from teamspeak_prometheus.metrics import build_exporter_metrics, build_gauges
+from teamspeak_prometheus.redaction import (
+    RedactingFilter,
+    redact,
+    secrets_for_redaction,
+)
+from teamspeak_prometheus.service import Teamspeak3MetricService
 from tests.fakes import FakeTs3Client, factory_for
 
 SECRET = 'fixture-secret'
@@ -29,7 +44,7 @@ def record(msg: object, *args: object, exc_info=None) -> logging.LogRecord:
 
 def filtered(msg: object, *args: object, secrets=(SECRET,), exc_info=None) -> str:
     entry = record(msg, *args, exc_info=exc_info)
-    assert app.RedactingFilter(list(secrets)).filter(entry) is True
+    assert RedactingFilter(list(secrets)).filter(entry) is True
     return formatted(entry)
 
 
@@ -37,10 +52,10 @@ def filtered(msg: object, *args: object, secrets=(SECRET,), exc_info=None) -> st
 def redaction():
     """Install the filter on the exporter logger for one test."""
 
-    installed = app.RedactingFilter([SECRET])
-    app.log.addFilter(installed)
+    installed = RedactingFilter([SECRET])
+    log.addFilter(installed)
     yield
-    app.log.removeFilter(installed)
+    log.removeFilter(installed)
 
 
 # -- redaction ---------------------------------------------------------------
@@ -57,7 +72,7 @@ def test_a_secret_in_the_message_itself_is_censored():
 
 
 def test_a_secret_inside_an_exception_argument_is_censored():
-    err = app.ServerQueryError('use', 1033, f'echo {SECRET}')
+    err = ServerQueryError('use', 1033, f'echo {SECRET}')
 
     assert SECRET not in filtered('Skipping virtualserver %s: %s', 2, err)
 
@@ -92,7 +107,7 @@ def test_mapping_arguments_are_cleaned():
     entry = logging.LogRecord(
         'test', logging.INFO, __file__, 1, 'name=%(name)s', ({'name': SECRET},), None
     )
-    app.RedactingFilter([SECRET]).filter(entry)
+    RedactingFilter([SECRET]).filter(entry)
 
     assert formatted(entry) == 'name=*censored*'
 
@@ -155,7 +170,7 @@ def test_a_secret_split_across_template_and_argument_is_censored():
 def test_a_broken_format_string_neither_raises_nor_leaks(capsys):
     entry = record('port %d', f'{SECRET}\nforged')
 
-    app.RedactingFilter([SECRET]).filter(entry)
+    RedactingFilter([SECRET]).filter(entry)
     output = formatted(entry)
 
     assert SECRET not in output
@@ -172,22 +187,22 @@ def test_numeric_arguments_keep_their_format():
 
 
 def test_configure_logging_installs_exactly_one_filter():
-    before = list(app.log.filters)
+    before = list(log.filters)
     try:
-        app.configure_logging('INFO', secrets=['first'])
-        app.configure_logging('INFO', secrets=['second'])
+        configure_logging('INFO', secrets=['first'])
+        configure_logging('INFO', secrets=['second'])
 
-        installed = [f for f in app.log.filters if isinstance(f, app.RedactingFilter)]
+        installed = [f for f in log.filters if isinstance(f, RedactingFilter)]
         assert len(installed) == 1
         assert installed[0].secrets == ['second']
     finally:
-        app.log.filters[:] = before
+        log.filters[:] = before
 
 
 def test_a_hostile_server_cannot_get_the_password_into_the_log(caplog, redaction):
     # The server echoes the submitted password and embeds a forged log line in
     # its error text, for a rejected login and for a failing virtualserver.
-    config = app.Config(
+    config = Config(
         host='ts.example.com',
         port=10011,
         username='serveradmin',
@@ -199,14 +214,14 @@ def test_a_hostile_server_cannot_get_the_password_into_the_log(caplog, redaction
         offline_message=f'not running {SECRET}\n2026-01-01 CRITICAL forged',
     )
     registry = CollectorRegistry()
-    service = app.Teamspeak3MetricService(
+    service = Teamspeak3MetricService(
         config,
-        app.build_gauges(registry),
-        app.build_exporter_metrics(registry),
+        build_gauges(registry),
+        build_exporter_metrics(registry),
         factory_for(client),
     )
     service.poll()
-    client.login_error = app.LoginFailed('login', 520, f'invalid password {SECRET}')
+    client.login_error = LoginFailed('login', 520, f'invalid password {SECRET}')
     service.poll()
 
     assert caplog.records
@@ -219,7 +234,7 @@ def test_a_hostile_server_cannot_get_the_password_into_the_log(caplog, redaction
 
 
 def redacted(text: str, *secrets: str) -> str:
-    return app.redact(text, app.secrets_for_redaction(list(secrets)))
+    return redact(text, secrets_for_redaction(list(secrets)))
 
 
 def test_an_ordinary_password_becomes_the_usual_marker():
@@ -256,10 +271,8 @@ def test_overlapping_secrets_leave_nothing_behind():
 def banner(secrets=(SECRET,), **env: str) -> str:
     """The settings banner as the exporter logs it, through the filter."""
 
-    config = app.resolve_config(app.parse_args([]), env)
-    return filtered(
-        app.SETTINGS_BANNER, *app.settings_arguments(config), secrets=secrets
-    )
+    config = resolve_config(parse_args([]), env)
+    return filtered(SETTINGS_BANNER, *settings_arguments(config), secrets=secrets)
 
 
 def test_the_settings_banner_never_shows_a_password_it_contains():
@@ -316,7 +329,7 @@ def test_no_secret_survives_redaction_fuzzed():
 def escaped_form(text: str) -> str:
     """What the filter's escaping turns ``text`` into."""
 
-    return str(app.RedactingFilter.escape(text))
+    return str(RedactingFilter.escape(text))
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from app import METRICS_NAMES, LoginFailed, ServerQueryError
+from teamspeak_prometheus.errors import LoginFailed, ServerQueryError
+from teamspeak_prometheus.metrics import METRICS_NAMES
 
 
 def serverinfo(virtualserver_name: str, base: int = 0) -> dict[str, object]:
@@ -19,7 +20,7 @@ def serverinfo(virtualserver_name: str, base: int = 0) -> dict[str, object]:
 
 @dataclass
 class FakeTs3Client:
-    """Implements ``app.Ts3Client`` with canned responses and a call log."""
+    """Implements ``serverquery.Ts3Client`` with canned responses and a call log."""
 
     servers: list[dict[str, object]] = field(
         default_factory=lambda: [

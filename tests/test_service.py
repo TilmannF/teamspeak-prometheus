@@ -8,10 +8,24 @@ import time
 import pytest
 from prometheus_client import CollectorRegistry, generate_latest
 
-import app
+from teamspeak_prometheus.config import MIN_POLL_INTERVAL_IN_SECONDS, Config
+from teamspeak_prometheus.errors import ServerQueryError
+from teamspeak_prometheus.main import Shutdown, handle_termination
+from teamspeak_prometheus.metrics import (
+    METRICS_NAMES,
+    build_exporter_metrics,
+    build_gauges,
+)
+from teamspeak_prometheus.service import (
+    MAX_BACKOFF_IN_SECONDS,
+    PollResult,
+    Teamspeak3MetricService,
+    next_delay,
+    poll_forever,
+)
 from tests.fakes import FakeTs3Client, factory_for, unreachable
 
-CONFIG = app.Config(
+CONFIG = Config(
     host='ts.example.com',
     port=10011,
     username='serveradmin',
@@ -25,10 +39,10 @@ class Setup:
         self.registry = CollectorRegistry()
         self.client = FakeTs3Client(**client_kwargs)
         self.now = 1_700_000_000.0
-        self.service = app.Teamspeak3MetricService(
+        self.service = Teamspeak3MetricService(
             CONFIG,
-            app.build_gauges(self.registry),
-            app.build_exporter_metrics(self.registry),
+            build_gauges(self.registry),
+            build_exporter_metrics(self.registry),
             factory or factory_for(self.client),
             clock=lambda: self.now,
         )
@@ -43,7 +57,7 @@ class Setup:
 def test_a_poll_connects_logs_in_and_reads_every_virtualserver():
     setup = Setup()
 
-    assert setup.service.poll() is app.PollResult.OK
+    assert setup.service.poll() is PollResult.OK
 
     assert ('connect', ('ts.example.com', 10011)) in setup.client.calls
     assert setup.calls('login') == [('login', 'serveradmin')]
@@ -85,7 +99,7 @@ def test_a_successful_poll_sets_the_self_metrics():
 def test_an_unreachable_server_is_counted_not_raised():
     setup = Setup(factory=unreachable)
 
-    assert setup.service.poll() is app.PollResult.FAILED
+    assert setup.service.poll() is PollResult.FAILED
 
     assert setup.value('teamspeak_exporter_poll_success') == 0
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='connection') == 1
@@ -96,16 +110,16 @@ def test_an_unreachable_server_is_counted_not_raised():
 def test_a_rejected_login_is_counted_and_closes_the_connection():
     setup = Setup(login_succeeds=False)
 
-    assert setup.service.poll() is app.PollResult.FAILED
+    assert setup.service.poll() is PollResult.FAILED
 
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='login') == 1
     assert setup.client.closed
 
 
 def test_a_login_error_other_than_rejection_counts_as_a_query_error():
-    setup = Setup(login_error=app.ServerQueryError('login', 524, 'client is flooding'))
+    setup = Setup(login_error=ServerQueryError('login', 524, 'client is flooding'))
 
-    assert setup.service.poll() is app.PollResult.FAILED
+    assert setup.service.poll() is PollResult.FAILED
 
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='query') == 1
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='login') == 0
@@ -114,7 +128,7 @@ def test_a_login_error_other_than_rejection_counts_as_a_query_error():
 def test_a_failed_serverlist_fails_the_poll():
     setup = Setup(serverlist_error='database empty result set')
 
-    assert setup.service.poll() is app.PollResult.FAILED
+    assert setup.service.poll() is PollResult.FAILED
 
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='query') == 1
     assert setup.calls('use') == []
@@ -123,7 +137,7 @@ def test_a_failed_serverlist_fails_the_poll():
 def test_an_offline_virtualserver_is_skipped_and_the_rest_still_read():
     setup = Setup(offline={1})
 
-    assert setup.service.poll() is app.PollResult.PARTIAL
+    assert setup.service.poll() is PollResult.PARTIAL
 
     assert setup.calls('serverinfo') == [('serverinfo', 2)]
     assert (
@@ -140,7 +154,7 @@ def test_a_session_deadline_counts_as_a_connection_error():
 
     setup = Setup(factory=hanging)
 
-    assert setup.service.poll() is app.PollResult.FAILED
+    assert setup.service.poll() is PollResult.FAILED
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='connection') == 1
 
 
@@ -165,7 +179,7 @@ def stopped_second(status: str = 'offline') -> list[dict[str, object]]:
 def test_a_virtualserver_that_is_not_online_is_skipped_without_error(status):
     setup = Setup(servers=stopped_second(status))
 
-    assert setup.service.poll() is app.PollResult.OK
+    assert setup.service.poll() is PollResult.OK
 
     assert setup.calls('use') == [('use', 1)]
     assert setup.value('teamspeak_exporter_poll_success') == 1
@@ -250,7 +264,7 @@ def test_virtualservers_sharing_a_name_are_warned_about_once(caplog):
 def test_the_last_virtualserver_read_wins_a_shared_name():
     setup = Setup(servers=same_name())
 
-    assert setup.service.poll() is app.PollResult.OK
+    assert setup.service.poll() is PollResult.OK
 
     series = [
         sample
@@ -259,7 +273,7 @@ def test_the_last_virtualserver_read_wins_a_shared_name():
         for sample in metric.samples
     ]
     assert len(series) == 1
-    assert series[0].value == 2000 + app.METRICS_NAMES.index('virtualserver_uptime')
+    assert series[0].value == 2000 + METRICS_NAMES.index('virtualserver_uptime')
 
 
 def test_a_duplicate_name_that_returns_is_warned_about_again(caplog):
@@ -289,7 +303,7 @@ def test_an_unexpected_exception_does_not_escape_the_poll():
 
     setup = Setup(factory=broken)
 
-    assert setup.service.poll() is app.PollResult.FAILED
+    assert setup.service.poll() is PollResult.FAILED
     assert setup.value('teamspeak_exporter_poll_errors_total', reason='unexpected') == 1
 
 
@@ -366,11 +380,11 @@ def test_series_survive_a_failed_poll():
 
 def test_a_shutdown_is_not_swallowed_by_the_poll():
     def terminated(host: str, port: int):
-        raise app.Shutdown
+        raise Shutdown
 
     setup = Setup(factory=terminated)
 
-    with pytest.raises(app.Shutdown):
+    with pytest.raises(Shutdown):
         setup.service.poll()
 
 
@@ -378,11 +392,11 @@ def test_a_shutdown_mid_session_still_closes_the_connection():
     setup = Setup()
 
     def interrupted() -> list[dict[str, object]]:
-        raise app.Shutdown
+        raise Shutdown
 
     setup.client.serverlist = interrupted
 
-    with pytest.raises(app.Shutdown):
+    with pytest.raises(Shutdown):
         setup.service.poll()
 
     assert setup.client.closed
@@ -391,10 +405,10 @@ def test_a_shutdown_mid_session_still_closes_the_connection():
 def test_sigterm_raises_shutdown():
     previous = signal.getsignal(signal.SIGTERM)
     try:
-        app.handle_termination()
+        handle_termination()
         handler = signal.getsignal(signal.SIGTERM)
 
-        with pytest.raises(app.Shutdown):
+        with pytest.raises(Shutdown):
             handler(signal.SIGTERM, None)
     finally:
         signal.signal(signal.SIGTERM, previous)
@@ -446,39 +460,39 @@ class Loop:
 
 
 class ScriptedService:
-    def __init__(self, loop: Loop, results: list[app.PollResult]):
+    def __init__(self, loop: Loop, results: list[PollResult]):
         self.loop = loop
         self.results = list(results)
 
-    def poll(self) -> app.PollResult:
+    def poll(self) -> PollResult:
         self.loop.now += self.loop.poll_seconds
         return self.results.pop(0)
 
 
 def test_the_interval_is_measured_start_to_start():
     loop = Loop(poll_seconds=1.5)
-    service = ScriptedService(loop, [app.PollResult.OK] * 3)
+    service = ScriptedService(loop, [PollResult.OK] * 3)
 
-    app.poll_forever(service, 5, iterations=3, sleep=loop.sleep, clock=loop.clock)
+    poll_forever(service, 5, iterations=3, sleep=loop.sleep, clock=loop.clock)
 
     assert loop.sleeps == [3.5, 3.5]
 
 
 def test_failed_polls_back_off_and_success_resets():
     loop = Loop()
-    failed, ok = app.PollResult.FAILED, app.PollResult.OK
+    failed, ok = PollResult.FAILED, PollResult.OK
     service = ScriptedService(loop, [failed, failed, failed, ok, ok])
 
-    app.poll_forever(service, 5, iterations=5, sleep=loop.sleep, clock=loop.clock)
+    poll_forever(service, 5, iterations=5, sleep=loop.sleep, clock=loop.clock)
 
     assert loop.sleeps == [10, 20, 40, 5]
 
 
 def test_a_partial_poll_does_not_back_off():
     loop = Loop()
-    service = ScriptedService(loop, [app.PollResult.PARTIAL] * 2)
+    service = ScriptedService(loop, [PollResult.PARTIAL] * 2)
 
-    app.poll_forever(service, 5, iterations=2, sleep=loop.sleep, clock=loop.clock)
+    poll_forever(service, 5, iterations=2, sleep=loop.sleep, clock=loop.clock)
 
     assert loop.sleeps == [5]
 
@@ -488,11 +502,11 @@ def test_a_partial_poll_does_not_back_off():
     [(5, 0, 5), (5, 1, 10), (5, 4, 60), (5, 50, 60), (120, 3, 120)],
 )
 def test_backoff_is_capped_but_never_below_the_interval(interval, failures, expected):
-    assert app.next_delay(interval, failures) == expected
+    assert next_delay(interval, failures) == expected
 
 
 def test_backoff_reaches_the_cap_from_the_shortest_allowed_interval():
-    delays = [app.next_delay(app.MIN_POLL_INTERVAL_IN_SECONDS, n) for n in range(1, 10)]
+    delays = [next_delay(MIN_POLL_INTERVAL_IN_SECONDS, n) for n in range(1, 10)]
 
     assert delays == [2, 4, 8, 16, 32, 60, 60, 60, 60]
 
@@ -501,15 +515,15 @@ def test_backoff_reaches_the_cap_from_the_shortest_allowed_interval():
 def test_backoff_reaches_the_cap_even_from_tiny_intervals(interval):
     # Not configurable, but the backoff must not depend on that: it keeps
     # doubling until the cap instead of stopping after a fixed number of steps.
-    assert app.next_delay(interval, 10_000) == app.MAX_BACKOFF_IN_SECONDS
+    assert next_delay(interval, 10_000) == MAX_BACKOFF_IN_SECONDS
 
 
 @pytest.mark.parametrize('interval', [5e-324, 1, 59.9, 86400])
 @pytest.mark.parametrize('failures', [1, 1_023, 1_024, 1_100, 10**9])
 def test_backoff_never_overflows_or_exceeds_its_cap(interval, failures):
-    delay = app.next_delay(interval, failures)
+    delay = next_delay(interval, failures)
 
-    assert interval < delay <= max(interval, app.MAX_BACKOFF_IN_SECONDS) or (
+    assert interval < delay <= max(interval, MAX_BACKOFF_IN_SECONDS) or (
         delay == interval == 86400
     )
 
@@ -520,10 +534,10 @@ def test_every_password_given_is_censored_in_labels():
     client = FakeTs3Client(
         servers=[{'virtualserver_id': 1, 'virtualserver_name': 'Server old-secret'}]
     )
-    service = app.Teamspeak3MetricService(
+    service = Teamspeak3MetricService(
         CONFIG,
-        app.build_gauges(registry),
-        app.build_exporter_metrics(registry),
+        build_gauges(registry),
+        build_exporter_metrics(registry),
         factory_for(client),
         secrets=['old-secret', CONFIG.password],
     )
@@ -540,10 +554,10 @@ def test_the_configured_password_is_always_a_secret():
     client = FakeTs3Client(
         servers=[{'virtualserver_id': 1, 'virtualserver_name': CONFIG.password}]
     )
-    service = app.Teamspeak3MetricService(
+    service = Teamspeak3MetricService(
         CONFIG,
-        app.build_gauges(registry),
-        app.build_exporter_metrics(registry),
+        build_gauges(registry),
+        build_exporter_metrics(registry),
         factory_for(client),
         secrets=['something-else'],
     )
@@ -581,10 +595,10 @@ def test_the_poll_duration_ignores_a_stepped_wall_clock(step):
     clocks = SteppedClocks(step)
     registry = CollectorRegistry()
     started = clocks.wall
-    service = app.Teamspeak3MetricService(
+    service = Teamspeak3MetricService(
         CONFIG,
-        app.build_gauges(registry),
-        app.build_exporter_metrics(registry),
+        build_gauges(registry),
+        build_exporter_metrics(registry),
         clocks.factory(FakeTs3Client()),
         clock=lambda: clocks.wall,
         monotonic=lambda: clocks.monotonic,
@@ -604,7 +618,7 @@ def test_the_poll_duration_ignores_a_stepped_wall_clock(step):
 def test_the_service_uses_the_monotonic_clock_by_default():
     import inspect
 
-    parameters = inspect.signature(app.Teamspeak3MetricService).parameters
+    parameters = inspect.signature(Teamspeak3MetricService).parameters
 
     assert parameters['monotonic'].default is time.monotonic
     assert parameters['clock'].default is time.time

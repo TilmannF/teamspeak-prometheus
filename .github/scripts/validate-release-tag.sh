@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # Fails unless TAG is a release tag that matches the code being released.
 #
-#   .github/scripts/validate-release-tag.sh TAG [APP_PY]
+#   .github/scripts/validate-release-tag.sh TAG [REPOSITORY_ROOT]
 #
 # A release tag is exactly vMAJOR.MINOR.PATCH: SemVer without prerelease or
-# build metadata, no leading zeros. It must equal "v" + __version__ in app.py,
-# which is what teamspeak_exporter_build_info reports, and CHANGELOG.md next to
-# app.py must have a section for that version. See docs/releasing.md.
+# build metadata, no leading zeros. It must equal "v" + __version__ in
+# teamspeak_prometheus/__init__.py, which is what teamspeak_exporter_build_info
+# reports, and CHANGELOG.md must have a section for that version. See
+# docs/releasing.md.
 
 set -euo pipefail
 
-TAG="${1:?usage: validate-release-tag.sh TAG [APP_PY]}"
-APP_PY="${2:-app.py}"
-CHANGELOG="$(dirname "$APP_PY")/CHANGELOG.md"
+TAG="${1:?usage: validate-release-tag.sh TAG [REPOSITORY_ROOT]}"
+ROOT="${2:-.}"
+VERSION_FILE="$ROOT/teamspeak_prometheus/__init__.py"
+CHANGELOG="$ROOT/CHANGELOG.md"
 
 fail() {
   echo "::error::$1"
@@ -23,12 +25,12 @@ if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
   fail "'$TAG' is not a release tag; expected vMAJOR.MINOR.PATCH, e.g. v1.2.3"
 fi
 
-VERSION="$(sed -n "s/^__version__ = '\(.*\)'\$/\1/p" "$APP_PY")"
+VERSION="$(sed -n "s/^__version__ = '\(.*\)'\$/\1/p" "$VERSION_FILE")"
 if [[ -z "$VERSION" ]]; then
-  fail "no __version__ = '...' line in $APP_PY"
+  fail "no __version__ = '...' line in $VERSION_FILE"
 fi
 if [[ "$TAG" != "v$VERSION" ]]; then
-  fail "tag $TAG does not match __version__ '$VERSION' in $APP_PY; bump it before tagging"
+  fail "tag $TAG does not match __version__ '$VERSION' in $VERSION_FILE; bump it before tagging"
 fi
 
 if ! grep -qF "## [$VERSION]" "$CHANGELOG"; then

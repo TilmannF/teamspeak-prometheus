@@ -10,7 +10,16 @@ from pathlib import Path
 
 import pytest
 
-import app
+from teamspeak_prometheus import main as main_module
+from teamspeak_prometheus.cli import (
+    given_values,
+    parse_args,
+    password_candidates,
+)
+from teamspeak_prometheus.config import overridden_flags, resolve_config
+from teamspeak_prometheus.errors import ExporterError
+from teamspeak_prometheus.logs import log
+from teamspeak_prometheus.main import main
 
 SECRET = 'fixture-secret'
 ENVIRONMENT = [
@@ -31,16 +40,16 @@ def clean_env(monkeypatch):
     for variable in ENVIRONMENT:
         monkeypatch.delenv(variable, raising=False)
     root = logging.getLogger()
-    handlers, level, filters = root.handlers[:], root.level, app.log.filters[:]
+    handlers, level, filters = root.handlers[:], root.level, log.filters[:]
     yield monkeypatch
     root.handlers[:] = handlers
     root.setLevel(level)
-    app.log.filters[:] = filters
+    log.filters[:] = filters
 
 
 def parse_error(argv: list[str], capsys) -> str:
     with pytest.raises(SystemExit) as caught:
-        app.parse_args(argv)
+        parse_args(argv)
     assert caught.value.code == 2
     return capsys.readouterr().err
 
@@ -149,22 +158,22 @@ def test_a_flag_missing_its_value_is_still_reported(capsys):
 def test_a_malformed_flag_overridden_by_the_environment_is_ignored(
     flag, bad, variable, good, field, expected
 ):
-    args = app.parse_args([flag, bad])
+    args = parse_args([flag, bad])
     env = {variable: good}
 
-    assert getattr(app.resolve_config(args, env), field) == expected
-    assert app.overridden_flags(args, env) == [f'{flag} ({variable} is set)']
+    assert getattr(resolve_config(args, env), field) == expected
+    assert overridden_flags(args, env) == [f'{flag} ({variable} is set)']
 
 
 def test_a_malformed_flag_without_override_names_flag_and_variable():
-    with pytest.raises(app.ExporterError) as caught:
-        app.resolve_config(app.parse_args(['--ts3port', 'nope']), {})
+    with pytest.raises(ExporterError) as caught:
+        resolve_config(parse_args(['--ts3port', 'nope']), {})
 
     assert 'TEAMSPEAK_PORT (--ts3port) must be a port number' in str(caught.value)
 
 
 def test_the_log_level_flag_is_case_insensitive():
-    config = app.resolve_config(app.parse_args(['--loglevel', 'warning']), {})
+    config = resolve_config(parse_args(['--loglevel', 'warning']), {})
 
     assert config.log_level == 'WARNING'
 
@@ -173,13 +182,13 @@ def test_the_log_level_flag_is_case_insensitive():
 
 
 def test_every_given_password_is_a_secret():
-    args = app.parse_args(['--ts3password', 'from-flag'])
+    args = parse_args(['--ts3password', 'from-flag'])
 
-    assert app.password_candidates(args, {'TEAMSPEAK_PASSWORD': 'from-env'}) == [
+    assert password_candidates(args, {'TEAMSPEAK_PASSWORD': 'from-env'}) == [
         'from-flag',
         'from-env',
     ]
-    assert app.password_candidates(app.parse_args([]), {}) == []
+    assert password_candidates(parse_args([]), {}) == []
 
 
 @pytest.mark.parametrize(
@@ -200,7 +209,7 @@ def test_a_configuration_error_never_prints_the_password(argv, env, clean_env, c
     for variable, value in env.items():
         clean_env.setenv(variable, value)
 
-    assert app.main(argv) == 2
+    assert main(argv) == 2
 
     err = capsys.readouterr().err
     assert 'Invalid configuration' in err
@@ -255,7 +264,7 @@ def test_no_command_line_parser_bypasses_value_masking():
         if (lines := plain_parsers(path))
     }
 
-    assert offenders == {}, 'use app.SafeArgumentParser, see AGENTS.md "Secrets"'
+    assert offenders == {}, 'use SafeArgumentParser, see AGENTS.md "Secrets"'
 
 
 @pytest.mark.parametrize(
@@ -287,7 +296,7 @@ def test_the_test_tools_never_print_a_value_either(tool, argv, capsys):
 
 def parse_error_with(argv: list[str], secrets: list[str], capsys) -> str:
     with pytest.raises(SystemExit) as caught:
-        app.parse_args(argv, secrets=secrets)
+        parse_args(argv, secrets=secrets)
     assert caught.value.code == 2
     return capsys.readouterr().err
 
@@ -318,7 +327,7 @@ def test_main_censors_an_environment_password_equal_to_a_flag_name(clean_env, ca
     clean_env.setenv('TEAMSPEAK_PASSWORD', '--ts3port')
 
     with pytest.raises(SystemExit):
-        app.main(['--ts3port'])
+        main(['--ts3port'])
 
     assert '--ts3port' not in capsys.readouterr().err
 
@@ -344,26 +353,27 @@ def test_main_hands_one_password_list_to_every_censor(clean_env, monkeypatch):
 
     clean_env.setenv('TEAMSPEAK_PASSWORD', 'from-env')
     seen: dict[str, list[list[str]]] = {'logging': [], 'argparse': [], 'service': []}
-    configure_logging, parse_args = app.configure_logging, app.parse_args
+    real_configure_logging = main_module.configure_logging
+    real_parse_args = main_module.parse_args
 
     def record_logging(level, secrets=None):
         seen['logging'].append(sorted(secrets or []))
-        configure_logging(level, secrets)
+        real_configure_logging(level, secrets)
 
     def record_parse_args(argv=None, secrets=None):
         seen['argparse'].append(sorted(secrets or []))
-        return parse_args(argv, secrets)
+        return real_parse_args(argv, secrets)
 
     def record_serve(config, secrets):
         seen['service'].append(sorted(secrets))
         return 0
 
-    monkeypatch.setattr(app, 'configure_logging', record_logging)
-    monkeypatch.setattr(app, 'parse_args', record_parse_args)
-    monkeypatch.setattr(app, 'serve', record_serve)
-    monkeypatch.setattr(app, 'handle_termination', lambda: None)
+    monkeypatch.setattr(main_module, 'configure_logging', record_logging)
+    monkeypatch.setattr(main_module, 'parse_args', record_parse_args)
+    monkeypatch.setattr(main_module, 'serve', record_serve)
+    monkeypatch.setattr(main_module, 'handle_termination', lambda: None)
 
-    assert app.main(['--ts3password', 'from-flag']) == 0
+    assert main(['--ts3password', 'from-flag']) == 0
 
     both = ['from-env', 'from-flag']
     assert seen['argparse'] == [['from-env']]  # before the flags are parsed
@@ -375,19 +385,19 @@ def test_main_hands_one_password_list_to_every_censor(clean_env, monkeypatch):
 
 
 def test_every_value_of_a_repeated_password_flag_is_remembered():
-    args = app.parse_args(
+    args = parse_args(
         ['--ts3password', 'first', '--ts3pass', 'second', '--ts3password=third']
     )
 
     assert args.ts3password == 'third'  # argparse semantics unchanged: last wins
-    assert app.given_values(args, 'ts3password') == ['first', 'second', 'third']
-    assert app.resolve_config(args, {}).password == 'third'
+    assert given_values(args, 'ts3password') == ['first', 'second', 'third']
+    assert resolve_config(args, {}).password == 'third'
 
 
 def test_every_repeated_password_is_a_candidate():
-    args = app.parse_args(['--ts3password', 'first', '--ts3password', 'second'])
+    args = parse_args(['--ts3password', 'first', '--ts3password', 'second'])
 
-    assert app.password_candidates(args, {'TEAMSPEAK_PASSWORD': 'env'}) == [
+    assert password_candidates(args, {'TEAMSPEAK_PASSWORD': 'env'}) == [
         'first',
         'second',
         'env',
@@ -395,29 +405,27 @@ def test_every_repeated_password_is_a_candidate():
 
 
 def test_a_single_or_missing_password_flag_still_works():
-    assert app.given_values(app.parse_args(['--ts3password', 'x']), 'ts3password') == [
-        'x'
-    ]
-    assert app.given_values(app.parse_args([]), 'ts3password') == []
+    assert given_values(parse_args(['--ts3password', 'x']), 'ts3password') == ['x']
+    assert given_values(parse_args([]), 'ts3password') == []
 
 
 def test_main_hands_every_repeated_password_to_every_censor(clean_env, monkeypatch):
     seen: list[list[str]] = []
-    configure_logging = app.configure_logging
+    real_configure_logging = main_module.configure_logging
 
     def record_logging(level, secrets=None):
         seen.append(sorted(secrets or []))
-        configure_logging(level, secrets)
+        real_configure_logging(level, secrets)
 
     def record_serve(config, secrets):
         seen.append(sorted(secrets))
         return 0
 
-    monkeypatch.setattr(app, 'configure_logging', record_logging)
-    monkeypatch.setattr(app, 'serve', record_serve)
-    monkeypatch.setattr(app, 'handle_termination', lambda: None)
+    monkeypatch.setattr(main_module, 'configure_logging', record_logging)
+    monkeypatch.setattr(main_module, 'serve', record_serve)
+    monkeypatch.setattr(main_module, 'handle_termination', lambda: None)
 
-    assert app.main(['--ts3password', 'first', '--ts3password', 'second']) == 0
+    assert main(['--ts3password', 'first', '--ts3password', 'second']) == 0
 
     assert seen[-1] == seen[-2] == ['first', 'second']  # service, final filter
 
@@ -427,7 +435,7 @@ def test_main_hands_every_repeated_password_to_every_censor(clean_env, monkeypat
 
 def help_output(argv: list[str], capsys, secrets: list[str] | None = None) -> str:
     with pytest.raises(SystemExit) as caught:
-        app.parse_args(argv, secrets=secrets)
+        parse_args(argv, secrets=secrets)
     assert caught.value.code == 0
     return capsys.readouterr().out
 

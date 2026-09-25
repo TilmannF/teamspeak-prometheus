@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 from prometheus_client import CollectorRegistry
 
-import app
+from teamspeak_prometheus.metrics import (
+    ExporterMetrics,
+    build_exporter_metrics,
+    build_gauges,
+)
 from tests.fakes import FakeTs3Client, serverinfo
 
 
@@ -16,12 +20,12 @@ def registry() -> CollectorRegistry:
 
 @pytest.fixture
 def gauges(registry: CollectorRegistry) -> dict[str, object]:
-    return app.build_gauges(registry)
+    return build_gauges(registry)
 
 
 @pytest.fixture
-def exporter_metrics(registry: CollectorRegistry) -> app.ExporterMetrics:
-    return app.build_exporter_metrics(registry)
+def exporter_metrics(registry: CollectorRegistry) -> ExporterMetrics:
+    return build_exporter_metrics(registry)
 
 
 @pytest.fixture

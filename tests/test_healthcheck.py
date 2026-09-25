@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import healthcheck
+from teamspeak_prometheus import healthcheck
 
 OWN_PID = 999_999
 SECRET = 'not-to-be-printed'
