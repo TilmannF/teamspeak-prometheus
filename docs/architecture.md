@@ -17,8 +17,9 @@ teamspeak_prometheus/
                    overridden_flags, the settings banner
   cli.py           SafeArgumentParser (masks and censors everything argparse
                    prints), RememberEveryValue, parse_args, password_candidates
-  service.py       Teamspeak3MetricService (one session per poll), PollResult,
-                   next_delay, poll_forever
+  service.py       Teamspeak3MetricService: one session per poll, read in
+                   full before anything is recorded; PollResult
+  loop.py          poll_forever, next_delay: interval and backoff
   serverquery.py   ServerQueryClient: login, serverlist, serverinfo, flood
                    retries, session budget; Ts3Client, default_client_factory
   wire.py          ServerQuery framing and escaping, decode_record
@@ -32,7 +33,8 @@ teamspeak_prometheus/
 
 Dependencies point one way: `errors`, `wire` and `redaction` depend on nothing
 in the package; `logs` on `redaction`; `config`, `serverquery` and `metrics` on
-those; `cli` on `config`; `service` on all of these; `main` on everything.
+those; `cli` on `config`; `service` on all of these; `loop` on `service`;
+`main` on everything.
 `app.py` and `healthcheck.py` stay at the repository root as entry points, so
 `python app.py`, the container commands and the healthcheck's process
 detection are the same as before the split.
@@ -71,7 +73,7 @@ main(argv)
 | `build_gauges` / `update_gauges` | pure over an injected registry | `tests/test_metrics.py` |
 | `ServerQueryClient` | protocol over an injected connection | `tests/test_client.py` (scripted bytes, real TS3 captures) |
 | `Teamspeak3MetricService` | I/O, but the client is injected | `tests/test_service.py` |
-| `poll_forever`, `next_delay` | loop over injected clock and sleep | `tests/test_service.py` |
+| `poll_forever`, `next_delay` (`loop.py`) | loop over injected clock and sleep | `tests/test_service.py` |
 | everything together | subprocess + fake TCP server | `tests/test_smoke.py` |
 
 Three properties make this testable, and all three are required by
@@ -140,7 +142,15 @@ bind. Everything else is logged, counted, and retried:
 | `serverinfo` field missing or not numeric | that series skipped and removed, warning logged once | `teamspeak_exporter_missing_fields` |
 | Anything else | logged with traceback, poll fails, backoff | `reason="unexpected"` |
 
-A poll that **fails** keeps every existing series at its last value and sets
+A poll reads every virtualserver first and records nothing until its session
+has completed (`_read`, then `_apply`). A poll that **fails** part-way — the
+connection drops after some virtualservers were read, the session budget runs
+out — therefore records none of what it read: the previous snapshot stays
+whole, never half new and half old. While a long poll is still reading, a
+scrape sees the previous snapshot, not a mixture; only the short write at the
+end is not atomic against a concurrent scrape.
+
+A failed poll keeps every existing series at its last value and sets
 `teamspeak_exporter_poll_success` to 0 — alert on
 `teamspeak_exporter_last_successful_poll_timestamp_seconds` to catch stale
 data. Backoff doubles the wait per consecutive failed poll, capped at
@@ -207,8 +217,8 @@ small-alphabet cases.
 
 ## Series lifecycle
 
-After every poll that got a `serverlist`, the series of virtualservers that
-were not read are removed: deleted ones, ones not `online`, and ones that failed
+After every poll that completed its session (successful or partial), the
+series of virtualservers that were not read are removed: deleted ones, ones not `online`, and ones that failed
 this poll. Virtualservers sharing a name share their series — the last one
 read wins — and are warned about once per name. A
 missing `serverinfo` field removes just that series.

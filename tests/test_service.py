@@ -10,19 +10,14 @@ from prometheus_client import CollectorRegistry, generate_latest
 
 from teamspeak_prometheus.config import MIN_POLL_INTERVAL_IN_SECONDS, Config
 from teamspeak_prometheus.errors import ServerQueryError
+from teamspeak_prometheus.loop import MAX_BACKOFF_IN_SECONDS, next_delay, poll_forever
 from teamspeak_prometheus.main import Shutdown, handle_termination
 from teamspeak_prometheus.metrics import (
     METRICS_NAMES,
     build_exporter_metrics,
     build_gauges,
 )
-from teamspeak_prometheus.service import (
-    MAX_BACKOFF_IN_SECONDS,
-    PollResult,
-    Teamspeak3MetricService,
-    next_delay,
-    poll_forever,
-)
+from teamspeak_prometheus.service import PollResult, Teamspeak3MetricService
 from tests.fakes import FakeTs3Client, factory_for, unreachable
 
 CONFIG = Config(
@@ -622,3 +617,107 @@ def test_the_service_uses_the_monotonic_clock_by_default():
 
     assert parameters['monotonic'].default is time.monotonic
     assert parameters['clock'].default is time.time
+
+
+# -- a poll writes all of its readings, or none ---------------------------------
+
+
+def uptimes(setup: Setup) -> dict[str, float | None]:
+    return {
+        name: setup.value('teamspeak_virtualserver_uptime', virtualserver_name=name)
+        for name in ('First', 'Second')
+    }
+
+
+UPTIME = METRICS_NAMES.index('virtualserver_uptime')
+BEFORE = {'First': 1000.0 + UPTIME, 'Second': 2000.0 + UPTIME}
+
+
+def test_a_connection_lost_mid_poll_keeps_the_previous_snapshot_whole():
+    setup = Setup()
+    setup.service.poll()
+    setup.client.generation = 5
+    setup.client.drop_on = 2  # First was already read when this happens
+
+    assert setup.service.poll() is PollResult.FAILED
+
+    assert uptimes(setup) == BEFORE  # not First new and Second old
+
+
+def test_a_timeout_mid_poll_keeps_the_previous_snapshot_whole():
+    setup = Setup()
+    setup.service.poll()
+    setup.client.generation = 5
+    real_serverinfo = setup.client.serverinfo
+
+    def slow() -> dict[str, object]:
+        if setup.client._selected == 2:
+            raise TimeoutError('ServerQuery session did not finish within 60s')
+        return real_serverinfo()
+
+    setup.client.serverinfo = slow
+
+    assert setup.service.poll() is PollResult.FAILED
+    assert uptimes(setup) == BEFORE
+
+
+def test_nothing_is_written_while_the_poll_is_still_reading():
+    setup = Setup()
+    setup.service.poll()
+    setup.client.generation = 5
+    real_serverinfo = setup.client.serverinfo
+    seen_mid_poll: list[dict[str, float | None]] = []
+
+    def observed() -> dict[str, object]:
+        if setup.client._selected == 2:  # First has been read by now
+            seen_mid_poll.append(uptimes(setup))
+        return real_serverinfo()
+
+    setup.client.serverinfo = observed
+
+    assert setup.service.poll() is PollResult.OK
+
+    assert seen_mid_poll == [BEFORE]  # a scrape now would see one snapshot
+    assert uptimes(setup) == {name: value + 5 for name, value in BEFORE.items()}
+
+
+def test_a_failed_poll_also_leaves_missing_fields_and_removals_alone():
+    setup = Setup()
+    setup.service.poll()
+    setup.client.missing = {'virtualserver_uptime'}
+    setup.client.servers = setup.client.servers[:1] + [
+        {'virtualserver_id': 3, 'virtualserver_name': 'Third'}
+    ]
+    setup.client.drop_on = 3
+
+    setup.service.poll()
+
+    # nothing of the failed poll landed: First keeps its uptime, Second (not
+    # listed any more) is not removed, no missing-field count changed
+    assert uptimes(setup) == BEFORE
+    assert (
+        setup.value('teamspeak_exporter_missing_fields', virtualserver_name='First')
+        == 0
+    )
+
+
+def test_a_partial_poll_still_writes_everything_it_read():
+    setup = Setup(offline={2})
+    setup.client.generation = 5
+
+    assert setup.service.poll() is PollResult.PARTIAL
+
+    assert uptimes(setup) == {'First': BEFORE['First'] + 5, 'Second': None}
+
+
+def test_the_poll_after_a_failed_one_writes_everything_new():
+    setup = Setup()
+    setup.service.poll()
+    setup.client.generation = 5
+    setup.client.drop_on = 2
+    setup.service.poll()
+    setup.client.drop_on = None
+
+    assert setup.service.poll() is PollResult.OK
+
+    assert uptimes(setup) == {name: value + 5 for name, value in BEFORE.items()}

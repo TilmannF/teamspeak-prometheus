@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import enum
-import math
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
 from prometheus_client import Gauge
 
@@ -19,17 +19,31 @@ from teamspeak_prometheus.metrics import (
     update_gauges,
 )
 from teamspeak_prometheus.redaction import redact, secrets_for_redaction
-from teamspeak_prometheus.serverquery import ClientFactory, default_client_factory
-
-# After this many consecutive failed polls the wait between attempts stops
-# growing. Never shorter than the configured interval.
-MAX_BACKOFF_IN_SECONDS = 60.0
+from teamspeak_prometheus.serverquery import (
+    ClientFactory,
+    Ts3Client,
+    default_client_factory,
+)
 
 
 class PollResult(enum.Enum):
     OK = 'ok'
     PARTIAL = 'partial'  # reached the server; some virtualservers failed
     FAILED = 'failed'  # could not connect, log in, or list virtualservers
+
+
+@dataclass
+class _Session:
+    """What one ServerQuery session read, before any of it is recorded."""
+
+    servers: list[dict[str, str | None]]
+    result: PollResult = PollResult.OK
+    # (label name, serverinfo) of each virtualserver read
+    readings: list[tuple[str, dict[str, str | None]]] = field(default_factory=list)
+    # label name -> the ids of the virtualservers carrying it
+    owners: dict[str, list[str]] = field(default_factory=dict)
+    # virtualserver id -> status, for those serverlist reports not online
+    not_online: dict[str, str] = field(default_factory=dict)
 
 
 class Teamspeak3MetricService:
@@ -111,45 +125,60 @@ class Teamspeak3MetricService:
         client = self.client_factory(self.config.host, self.config.port)
         try:
             client.login(self.config.username, self.config.password)
-            servers = client.serverlist()
-            result = PollResult.OK
-            seen: set[str] = set()
-            not_online: dict[str, str] = {}
-            owners: dict[str, list[str]] = {}
-            for server in servers:
-                virtualserver_id = server.get('virtualserver_id')
-                status = server.get('virtualserver_status')
-                if status not in (None, 'online'):
-                    # Stopped (or booting, deploying, ...) is a state of the
-                    # host, not an error of the exporter: skip it silently.
-                    not_online[str(virtualserver_id)] = str(status)
-                    continue
-                try:
-                    client.use(virtualserver_id)
-                    serverinfo = client.serverinfo()
-                except ServerQueryError as err:
-                    log.warning('Skipping virtualserver %s: %s', virtualserver_id, err)
-                    self.exporter_metrics.poll_errors.labels(reason='query').inc()
-                    result = PollResult.PARTIAL
-                    continue
-                name = redact(
-                    str(
-                        serverinfo.get(VIRTUALSERVER_LABEL)
-                        or server.get(VIRTUALSERVER_LABEL)
-                        or f'virtualserver {virtualserver_id}'
-                    ),
-                    self._secrets,
-                )
-                self._record(name, serverinfo)
-                seen.add(name)
-                owners.setdefault(name, []).append(str(virtualserver_id))
-            self._report_duplicates(owners)
-            self._report_status_changes(not_online, servers)
-            self._forget(self.known_virtualservers - seen)
-            self.known_virtualservers = seen
-            return result
+            session = self._read(client)
         finally:
             client.close()
+        # Read first, write after: nothing is recorded until the whole session
+        # has completed. A poll that fails part-way -- connection lost, session
+        # budget spent -- raises out of _read and leaves the previous snapshot
+        # whole instead of half new, half old; and while a long poll reads, a
+        # scrape still sees one consistent snapshot.
+        self._apply(session)
+        return session.result
+
+    def _read(self, client: Ts3Client) -> _Session:
+        """Read every online virtualserver's ``serverinfo``; record nothing."""
+
+        session = _Session(servers=client.serverlist())
+        for server in session.servers:
+            virtualserver_id = server.get('virtualserver_id')
+            status = server.get('virtualserver_status')
+            if status not in (None, 'online'):
+                # Stopped (or booting, deploying, ...) is a state of the host,
+                # not an error of the exporter: skip it silently.
+                session.not_online[str(virtualserver_id)] = str(status)
+                continue
+            try:
+                client.use(virtualserver_id)
+                serverinfo = client.serverinfo()
+            except ServerQueryError as err:
+                log.warning('Skipping virtualserver %s: %s', virtualserver_id, err)
+                self.exporter_metrics.poll_errors.labels(reason='query').inc()
+                session.result = PollResult.PARTIAL
+                continue
+            name = redact(
+                str(
+                    serverinfo.get(VIRTUALSERVER_LABEL)
+                    or server.get(VIRTUALSERVER_LABEL)
+                    or f'virtualserver {virtualserver_id}'
+                ),
+                self._secrets,
+            )
+            session.readings.append((name, serverinfo))
+            session.owners.setdefault(name, []).append(str(virtualserver_id))
+        return session
+
+    def _apply(self, session: _Session) -> None:
+        """Write a completed session's readings, and retire what it lacks."""
+
+        seen: set[str] = set()
+        for name, serverinfo in session.readings:
+            self._record(name, serverinfo)
+            seen.add(name)
+        self._report_duplicates(session.owners)
+        self._report_status_changes(session.not_online, session.servers)
+        self._forget(self.known_virtualservers - seen)
+        self.known_virtualservers = seen
 
     def _report_duplicates(self, owners: dict[str, list[str]]) -> None:
         """Warn once per name shared by several virtualservers.
@@ -203,14 +232,14 @@ class Teamspeak3MetricService:
         self.exporter_metrics.missing_fields.labels(**{VIRTUALSERVER_LABEL: name}).set(
             len(skipped)
         )
-        for field in skipped:
-            if (name, field) not in self._warned_missing:
-                self._warned_missing.add((name, field))
+        for missing_field in skipped:
+            if (name, missing_field) not in self._warned_missing:
+                self._warned_missing.add((name, missing_field))
                 log.warning(
                     "Virtualserver '%s': serverinfo field %s missing or not numeric; "
                     'not exporting it',
                     name,
-                    field,
+                    missing_field,
                 )
 
     def _forget(self, virtualservers: set[str]) -> None:
@@ -225,44 +254,3 @@ class Teamspeak3MetricService:
             self._warned_missing = {
                 entry for entry in self._warned_missing if entry[0] != name
             }
-
-
-def next_delay(interval: float, consecutive_failures: int) -> float:
-    """Wait before the next poll: the interval, doubled per failure, capped.
-
-    ``interval`` must be positive. Doubling continues until the cap for any
-    positive interval, however small: the number of doublings is bounded by the
-    number actually needed to reach the cap, and ``ldexp`` scales by powers of
-    two without an intermediate result that could overflow.
-    """
-
-    if consecutive_failures == 0:
-        return interval
-    cap = max(interval, MAX_BACKOFF_IN_SECONDS)
-    # log2(cap) - log2(interval), not log2(cap / interval): the quotient
-    # overflows to infinity for a subnormal interval.
-    needed = math.ceil(math.log2(cap) - math.log2(interval))
-    return min(math.ldexp(interval, min(consecutive_failures, needed)), cap)
-
-
-def poll_forever(
-    service: Teamspeak3MetricService,
-    interval_in_seconds: float,
-    iterations: int | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> None:
-    """Poll every ``interval_in_seconds``, start to start — forever, or
-    ``iterations`` times. Backs off while polls fail outright."""
-
-    failures = 0
-    remaining = iterations
-    while remaining is None or remaining > 0:
-        started = clock()
-        result = service.poll()
-        failures = failures + 1 if result is PollResult.FAILED else 0
-        if remaining is not None:
-            remaining -= 1
-            if remaining == 0:
-                return
-        sleep(max(next_delay(interval_in_seconds, failures) - (clock() - started), 0))

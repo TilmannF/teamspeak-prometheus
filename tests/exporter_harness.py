@@ -25,9 +25,10 @@ from teamspeak_prometheus.config import (
     resolve_config,
 )
 from teamspeak_prometheus.logs import configure_logging, log
+from teamspeak_prometheus.loop import poll_forever
 from teamspeak_prometheus.metrics import build_exporter_metrics, build_gauges
 from teamspeak_prometheus.redaction import printable, redact, secrets_for_redaction
-from teamspeak_prometheus.service import Teamspeak3MetricService, poll_forever
+from teamspeak_prometheus.service import Teamspeak3MetricService
 from tests.fake_ts3_server import FakeTs3Server
 
 

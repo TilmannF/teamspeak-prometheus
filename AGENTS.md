@@ -84,8 +84,9 @@ teamspeak_prometheus/
                    overridden_flags, the settings banner
   cli.py           SafeArgumentParser (masks and censors everything argparse
                    prints), RememberEveryValue, parse_args, password_candidates
-  service.py       Teamspeak3MetricService (one session per poll), PollResult,
-                   next_delay, poll_forever
+  service.py       Teamspeak3MetricService: one session per poll, read in
+                   full before anything is recorded; PollResult
+  loop.py          poll_forever, next_delay: interval and backoff
   serverquery.py   ServerQueryClient: login, serverlist, serverinfo, flood
                    retries, session budget; Ts3Client, default_client_factory
   wire.py          ServerQuery framing and escaping, decode_record

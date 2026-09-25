@@ -18,8 +18,9 @@ from teamspeak_prometheus.config import (
 )
 from teamspeak_prometheus.errors import ExporterError
 from teamspeak_prometheus.logs import configure_logging, log
+from teamspeak_prometheus.loop import poll_forever
 from teamspeak_prometheus.metrics import build_exporter_metrics, build_gauges
-from teamspeak_prometheus.service import Teamspeak3MetricService, poll_forever
+from teamspeak_prometheus.service import Teamspeak3MetricService
 
 
 class Shutdown(BaseException):

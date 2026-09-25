@@ -96,6 +96,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
   minutes — so a server that trickles data or never ends a line cannot stall
   the exporter, while a large throttled host is still read completely.
 - Stopped virtualservers are skipped instead of failing every poll.
+- A poll records nothing until its whole session has completed: one that fails
+  part-way no longer leaves some virtualservers updated and others stale, and a
+  scrape during a long poll no longer sees a mixture.
 - The exporter stops cleanly on SIGTERM. As PID 1 in the container it used to
   ignore it, so `docker stop` waited 10 seconds and killed it.
 - A malformed ServerQuery error line is an error, not success.

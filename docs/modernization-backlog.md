@@ -47,7 +47,15 @@ and HTTP WebQuery, plus its own Prometheus endpoint. Supporting it would mean a
 WebQuery transport (TS3 3.12+ has WebQuery too, but a read-scope API key cannot
 call `serverinfo`, so it needs a `manage` key). Revisit when TS6 is stable.
 
-## 6. Supply-chain polish
+## 6. Atomic snapshot against concurrent scrapes
+
+A poll records its readings only after the whole session, so failed polls never
+leave a mixed snapshot and a long read never shows one. The write at the end
+still updates gauge by gauge; a scrape landing in those microseconds can see
+part of the new snapshot. Making the switch atomic needs a custom collector that
+swaps a complete snapshot; not worth it unless someone observes the effect.
+
+## 7. Supply-chain polish
 
 The base image is pinned by tag, not digest, and runtime dependencies are not
 hash-pinned. Both are Scorecard findings, neither is urgent with a single

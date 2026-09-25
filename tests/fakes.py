@@ -37,6 +37,10 @@ class FakeTs3Client:
     offline_message: str = 'server is not running'
     # field names left out of every serverinfo payload
     missing: set[str] = field(default_factory=set)
+    # added to every value, so each poll can see new numbers
+    generation: int = 0
+    # virtualserver id whose ``use`` loses the connection
+    drop_on: object = None
     calls: list[tuple[str, object]] = field(default_factory=list)
     closed: bool = False
     _selected: object = None
@@ -56,6 +60,8 @@ class FakeTs3Client:
 
     def use(self, virtualserver_id: object) -> None:
         self.calls.append(('use', virtualserver_id))
+        if virtualserver_id == self.drop_on:
+            raise ConnectionResetError(104, 'Connection reset by peer')
         if virtualserver_id in self.offline:
             raise ServerQueryError('use', 1033, self.offline_message)
         self._selected = virtualserver_id
@@ -67,7 +73,7 @@ class FakeTs3Client:
             for server in self.servers
             if server['virtualserver_id'] == self._selected
         )
-        info = serverinfo(str(name), 1000 * int(self._selected))
+        info = serverinfo(str(name), 1000 * int(self._selected) + self.generation)
         return {key: value for key, value in info.items() if key not in self.missing}
 
     def close(self) -> None:
