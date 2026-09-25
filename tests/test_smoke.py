@@ -936,3 +936,18 @@ def test_a_configured_value_cannot_forge_output_lines(argv, env):
     assert 'TS3 SETTINGS' in output
     assert FORGED in output  # logged, escaped onto the line it belongs to
     assert not any(line.startswith(FORGED) for line in output.splitlines())
+
+
+@pytest.mark.parametrize('variable', ['TEAMSPEAK_HOST', 'TEAMSPEAK_USERNAME'])
+def test_an_empty_variable_stops_the_exporter_with_a_clear_error(variable):
+    result = subprocess.run(
+        [sys.executable, 'app.py'],
+        env=app_env(**{variable: ''}),
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 2
+    assert f'{variable} (--' in result.stderr
+    assert 'must not be empty' in result.stderr

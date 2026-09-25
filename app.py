@@ -726,13 +726,30 @@ def _text(name: str, value: object) -> str:
     return str(value)
 
 
+def _required_text(name: str, value: object) -> str:
+    """Text that must not be empty: an empty host silently meant localhost,
+    an empty username a misleading "login rejected". docker-compose's
+    ``VAR:`` with no value sets exactly that."""
+
+    text = str(value)
+    if not text.strip():
+        raise ExporterError(f'{name} must not be empty')
+    return text
+
+
 # Every option: (argparse dest, environment variable, default, Config field,
 # parser). A parser turns a raw flag or environment value into the Config value
 # and raises ExporterError, naming the variable, when it is invalid.
 _OPTIONS: list[tuple[str, str, object, str, Callable[[str, object], object]]] = [
-    ('ts3host', 'TEAMSPEAK_HOST', DEFAULT_TS3_HOST, 'host', _text),
+    ('ts3host', 'TEAMSPEAK_HOST', DEFAULT_TS3_HOST, 'host', _required_text),
     ('ts3port', 'TEAMSPEAK_PORT', DEFAULT_TS3_PORT, 'port', _port),
-    ('ts3username', 'TEAMSPEAK_USERNAME', DEFAULT_TS3_USERNAME, 'username', _text),
+    (
+        'ts3username',
+        'TEAMSPEAK_USERNAME',
+        DEFAULT_TS3_USERNAME,
+        'username',
+        _required_text,
+    ),
     ('ts3password', 'TEAMSPEAK_PASSWORD', DEFAULT_TS3_PASSWORD, 'password', _text),
     ('metricsport', 'METRICS_PORT', DEFAULT_METRICS_PORT, 'metrics_port', _port),
     (

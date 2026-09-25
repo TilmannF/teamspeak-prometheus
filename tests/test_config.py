@@ -173,3 +173,40 @@ def test_the_settings_banner_never_contains_the_password(caplog):
 
     assert 'hunter2' not in caplog.text
     assert 'Password: *censored*' in caplog.text
+
+
+# -- empty values ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize('variable', ['TEAMSPEAK_HOST', 'TEAMSPEAK_USERNAME'])
+@pytest.mark.parametrize('value', ['', ' ', '\t'], ids=['empty', 'space', 'tab'])
+def test_an_empty_host_or_username_is_rejected(variable, value):
+    # docker-compose's "VAR:" with no value sets an empty variable
+    with pytest.raises(app.ExporterError, match=f'{variable} .* must not be empty'):
+        resolve(**{variable: value})
+
+
+@pytest.mark.parametrize('flag', ['--ts3host', '--ts3username'])
+def test_an_empty_host_or_username_flag_is_rejected(flag):
+    with pytest.raises(app.ExporterError, match='must not be empty'):
+        resolve([flag, ''])
+
+
+def test_an_empty_variable_overriding_a_good_flag_is_rejected():
+    # environment variables win, also when empty: that is a mistake to report,
+    # not to paper over with the flag
+    with pytest.raises(app.ExporterError, match='TEAMSPEAK_HOST'):
+        resolve(['--ts3host', 'ts.example.com'], TEAMSPEAK_HOST='')
+
+
+def test_an_empty_flag_overridden_by_a_good_variable_is_only_reported():
+    args = app.parse_args(['--ts3host', ''])
+    env = {'TEAMSPEAK_HOST': 'ts.example.com'}
+
+    assert app.resolve_config(args, env).host == 'ts.example.com'
+    assert app.overridden_flags(args, env) == ['--ts3host (TEAMSPEAK_HOST is set)']
+
+
+def test_an_empty_password_is_still_allowed():
+    # it is the default: a ServerQuery login without a password
+    assert resolve(TEAMSPEAK_PASSWORD='').password == ''

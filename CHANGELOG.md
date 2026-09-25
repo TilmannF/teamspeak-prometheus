@@ -94,6 +94,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
 - The exporter stops cleanly on SIGTERM. As PID 1 in the container it used to
   ignore it, so `docker stop` waited 10 seconds and killed it.
 - A malformed ServerQuery error line is an error, not success.
+- An empty host or username (e.g. `TEAMSPEAK_HOST:` with no value in a Compose
+  file) stops the exporter with a clear error instead of silently connecting
+  to localhost or failing the login.
 - Virtualservers sharing a name are warned about; their metrics collide
   because `virtualserver_name` is the only label (see
   `docs/modernization-backlog.md`).

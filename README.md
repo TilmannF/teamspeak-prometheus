@@ -88,7 +88,10 @@ List all arguments with `python app.py -h`.
 | `--loglevel` | `DEBUG`, `INFO`, `WARNING` or `ERROR` | *INFO* |
 
 Flags are only checked when they are used: a malformed flag that an
-environment variable overrides is ignored with a warning.
+environment variable overrides is ignored with a warning. An environment
+variable that is set but empty counts as set — `TEAMSPEAK_HOST:` with no value
+in a Compose file is an error, not a fallback to the default. Only the password
+may be empty.
 
 **Prefer `TEAMSPEAK_PASSWORD` over `--ts3password`.** A command-line argument
 is visible to anything that can read the process list (`ps`, `/proc/<pid>/cmdline`);
