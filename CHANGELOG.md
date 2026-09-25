@@ -30,8 +30,10 @@ It is the state as shipped: what a user gets if they pull this tag today.
   overridden flag is not validated, so a malformed one no longer stops the
   exporter.
 - The release workflow refuses a tag that is not exactly `vX.Y.Z`, does not
-  match `__version__`, or has no CHANGELOG section. A manually started run
-  only builds; only a validated tag push publishes.
+  match `__version__`, or has no CHANGELOG section. A manual run only builds,
+  in a read-only job; only a validated tag push publishes, and only that job
+  has write permissions. No workflow leaves the Git token behind after
+  checkout.
 - Container `HEALTHCHECK` that probes `/metrics` on the port the exporter
   actually uses (`METRICS_PORT` or `--metricsport`, also when set inline in
   the container command), never through a proxy

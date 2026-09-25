@@ -219,3 +219,96 @@ def test_latest_is_tagged_only_on_a_tag_push():
         f'type=raw,value=latest,enable=${{{{ {TAG_PUSH} }}}}'
         in (steps()[meta]['with']['tags'])
     )
+
+
+# -- least privilege: only the tag-push job can write --------------------------
+
+WRITE_PERMISSIONS = {'contents', 'packages', 'id-token', 'attestations'}
+
+
+def jobs() -> dict[str, dict]:
+    return workflow()['jobs']
+
+
+def writes(permissions: dict | str | None) -> set[str]:
+    if permissions in ('write-all',):
+        return {'*'}
+    if not isinstance(permissions, dict):
+        return set()
+    return {scope for scope, level in permissions.items() if level == 'write'}
+
+
+def test_the_workflow_grants_nothing_but_read_by_default():
+    assert workflow()['permissions'] == {'contents': 'read'}
+
+
+def test_only_the_tag_push_job_has_write_permissions():
+    writers = {name for name, job in jobs().items() if writes(job.get('permissions'))}
+
+    assert writers == {'release'}
+    assert jobs()['release']['if'] == TAG_PUSH
+    assert writes(jobs()['release']['permissions']) == WRITE_PERMISSIONS
+
+
+def test_a_manual_run_is_a_separate_read_only_build_job():
+    build = jobs()['build']
+
+    assert build['if'] == "github.event_name == 'workflow_dispatch'"
+    assert writes(build.get('permissions')) == set()
+    publishing = [
+        step
+        for step in build['steps']
+        if str(step.get('uses', '')).split('@')[0]
+        in {
+            'docker/login-action',
+            'actions/attest-build-provenance',
+            'softprops/action-gh-release',
+        }
+    ]
+    assert publishing == []
+    (image,) = [s for s in build['steps'] if uses('docker/build-push-action')(s)]
+    assert image['with']['push'] is False
+
+
+def test_both_jobs_build_the_same_platforms():
+    def platforms(job: str) -> str:
+        (image,) = [
+            s for s in jobs()[job]['steps'] if uses('docker/build-push-action')(s)
+        ]
+        return image['with']['platforms']
+
+    assert platforms('build') == platforms('release')
+
+
+# -- no workflow leaves the Git token behind ------------------------------------
+
+
+def all_checkouts() -> list[tuple[str, str, dict]]:
+    found = []
+    for path in sorted((ROOT / '.github' / 'workflows').glob('*.yml')):
+        for name, job in yaml.safe_load(path.read_text())['jobs'].items():
+            for step in job.get('steps', []):
+                if uses('actions/checkout')(step):
+                    found.append((path.name, name, step))
+    return found
+
+
+def test_every_workflow_is_scanned():
+    assert {f for f, _, _ in all_checkouts()} >= {
+        'ci.yml',
+        'release.yml',
+        'codeql.yml',
+        'scorecard.yml',
+    }
+
+
+def test_no_checkout_persists_its_credentials():
+    # actions/checkout writes the token into .git/config unless told not to;
+    # no job here pushes to Git, so none needs it there.
+    persisting = [
+        f'{file}:{job}'
+        for file, job, step in all_checkouts()
+        if (step.get('with') or {}).get('persist-credentials') is not False
+    ]
+
+    assert persisting == []

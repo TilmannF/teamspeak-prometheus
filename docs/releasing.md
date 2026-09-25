@@ -48,12 +48,14 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    provenance, and creates a GitHub Release with generated notes.
 
 To prove the build without publishing anything, start the workflow manually
-(`workflow_dispatch`, "Run workflow" in the Actions tab). A manual run always
-only builds: it never logs in to a registry, pushes, attests, or creates a
-release — publishing happens only for a pushed tag that passed the check in
-step 3.
+(`workflow_dispatch`, "Run workflow" in the Actions tab). A manual run is a
+separate `build` job with read-only permissions: it never logs in to a
+registry, pushes, attests, or creates a release, and never holds a write
+token. Publishing happens only in the `release` job, for a pushed tag that
+passed the check in step 3; only that job has write permissions.
 
 To retry a release that failed after the tag was pushed, re-run the original
 tag-push run ("Re-run jobs"). That run is a tag push again, so the tag is
 validated again. `tests/test_release.py` fails if any publishing step could
-run without a validated tag push.
+run without a validated tag push, if any job other than `release` could write,
+or if any workflow's checkout leaves the Git token in `.git/config`.

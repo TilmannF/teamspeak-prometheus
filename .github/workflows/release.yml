@@ -2,10 +2,11 @@ name: Release
 
 # Publishing happens only for a pushed vX.Y.Z tag, and only after
 # .github/scripts/validate-release-tag.sh accepted it (see docs/releasing.md).
-# A manual run (workflow_dispatch) always just builds: it proves the
-# multi-arch build but never logs in, pushes, attests, or creates a release.
-# To retry a failed release, re-run the original tag-push run -- that is
-# validated again. tests/test_release.py enforces all of this.
+# A manual run (workflow_dispatch) is a separate, read-only job that only
+# builds: it proves the multi-arch build but never logs in, pushes, attests, or
+# creates a release -- and never holds a write token. To retry a failed
+# release, re-run the original tag-push run -- that is validated again.
+# tests/test_release.py enforces all of this.
 
 on:
   push:
@@ -14,17 +15,41 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
-  release:
-    name: build, push, attest, release
+  build:
+    name: build only (manual run)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+
+  release:
+    name: build, push, attest, release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # secrets.* cannot appear directly in `if:`, so read it into env here
       # and expose a plain step output that later `if:` conditions can key on.
