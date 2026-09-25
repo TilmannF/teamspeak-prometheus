@@ -369,3 +369,54 @@ def test_main_hands_one_password_list_to_every_censor(clean_env, monkeypatch):
     assert seen['argparse'] == [['from-env']]  # before the flags are parsed
     assert seen['logging'] == [['from-env'], both, both]
     assert seen['service'] == [both]
+
+
+# -- repeated password flags: every value is a secret --------------------------
+
+
+def test_every_value_of_a_repeated_password_flag_is_remembered():
+    args = app.parse_args(
+        ['--ts3password', 'first', '--ts3pass', 'second', '--ts3password=third']
+    )
+
+    assert args.ts3password == 'third'  # argparse semantics unchanged: last wins
+    assert app.given_values(args, 'ts3password') == ['first', 'second', 'third']
+    assert app.resolve_config(args, {}).password == 'third'
+
+
+def test_every_repeated_password_is_a_candidate():
+    args = app.parse_args(['--ts3password', 'first', '--ts3password', 'second'])
+
+    assert app.password_candidates(args, {'TEAMSPEAK_PASSWORD': 'env'}) == [
+        'first',
+        'second',
+        'env',
+    ]
+
+
+def test_a_single_or_missing_password_flag_still_works():
+    assert app.given_values(app.parse_args(['--ts3password', 'x']), 'ts3password') == [
+        'x'
+    ]
+    assert app.given_values(app.parse_args([]), 'ts3password') == []
+
+
+def test_main_hands_every_repeated_password_to_every_censor(clean_env, monkeypatch):
+    seen: list[list[str]] = []
+    configure_logging = app.configure_logging
+
+    def record_logging(level, secrets=None):
+        seen.append(sorted(secrets or []))
+        configure_logging(level, secrets)
+
+    def record_serve(config, secrets):
+        seen.append(sorted(secrets))
+        return 0
+
+    monkeypatch.setattr(app, 'configure_logging', record_logging)
+    monkeypatch.setattr(app, 'serve', record_serve)
+    monkeypatch.setattr(app, 'handle_termination', lambda: None)
+
+    assert app.main(['--ts3password', 'first', '--ts3password', 'second']) == 0
+
+    assert seen[-1] == seen[-2] == ['first', 'second']  # service, final filter

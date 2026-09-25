@@ -15,7 +15,14 @@ import threading
 import time
 from collections import deque
 
-from app import METRICS_NAMES, SafeArgumentParser, redact, secrets_for_redaction
+from app import (
+    METRICS_NAMES,
+    RememberEveryValue,
+    SafeArgumentParser,
+    given_values,
+    redact,
+    secrets_for_redaction,
+)
 from tests.serverquery import (
     BANNER,
     LINE_TERMINATOR,
@@ -270,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         '--password',
         default='fake-password',
         help='ServerQuery password the fake server accepts (see docs/testing.md)',
+        action=RememberEveryValue,
     )
     parser.add_argument('--port', type=int, default=0, help='0 picks a free port')
     parser.add_argument('--virtualservers', type=int, default=2)
@@ -288,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         redact(
             f'Fake TS3 ServerQuery listening on {server.host}:{server.port}',
-            secrets_for_redaction([args.password]),
+            secrets_for_redaction(given_values(args, 'password')),
         )
     )
     try:

@@ -273,3 +273,12 @@ def test_a_password_equal_to_the_port_is_never_printed(
     out = capsys.readouterr().out
     assert '9100' not in out
     assert '*censored*' in out
+
+
+def test_every_repeated_password_of_the_exporter_is_a_secret(tmp_path):
+    proc = fake_proc(
+        tmp_path,
+        {1: ['python', '/app/app.py', '--ts3password', '9100', '--ts3password', 'x']},
+    )
+
+    assert set(healthcheck.exporter_secrets({}, proc)) == {'9100', 'x'}

@@ -546,6 +546,7 @@ def parse_args(
         '--ts3password',
         help='ServerQuery password of TS3 server. Prefer TEAMSPEAK_PASSWORD: '
         'flags are visible in the process list',
+        action=RememberEveryValue,
     )
     parser.add_argument(
         '--metricsport',
@@ -565,12 +566,45 @@ def parse_args(
     return parser.parse_args(argv)
 
 
+class RememberEveryValue(argparse.Action):
+    """For password flags: store the value as usual -- the last of repeated
+    flags wins -- and also remember every value given in ``<dest>_given``.
+
+    argparse keeps only the last value, but ``--ts3password old --ts3password
+    new`` gave two passwords, and both must be censored. argparse still
+    resolves abbreviations and ``--flag=value`` itself.
+    """
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        setattr(namespace, self.dest, values)
+        given = getattr(namespace, self.dest + '_given', None) or []
+        setattr(namespace, self.dest + '_given', [*given, values])
+
+
+def given_values(args: argparse.Namespace, dest: str) -> list[str]:
+    """Every value given for ``dest``: all repeats of a ``RememberEveryValue``
+    flag, else its single value (a default, say), else none."""
+
+    given = getattr(args, dest + '_given', None)
+    if given is not None:
+        return list(given)
+    value = getattr(args, dest, None)
+    return [value] if value else []
+
+
 def password_candidates(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
-    """Every password given, used or not: an overridden one is a secret too."""
+    """Every password given, used or not: each repeat of ``--ts3password`` and
+    ``TEAMSPEAK_PASSWORD``. An overridden one is a secret too."""
 
     return [
         value
-        for value in (getattr(args, 'ts3password', None), env.get('TEAMSPEAK_PASSWORD'))
+        for value in (*given_values(args, 'ts3password'), env.get('TEAMSPEAK_PASSWORD'))
         if value
     ]
 

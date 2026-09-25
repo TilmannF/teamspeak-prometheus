@@ -233,7 +233,10 @@ filter, the service (for `virtualserver_name` labels), and argparse errors
 `--ts3password` value from the command line themselves — also as
 `--ts3password=…` or an abbreviation). A password left on the command line
 while the environment overrides it, e.g. during a rotation, is censored
-everywhere. `tests/test_cli.py` checks that `main()` hands out the same list.
+everywhere. So is every repeat of a password flag: argparse keeps only the last
+`--ts3password`, which still wins for the configuration, but the flag's
+`RememberEveryValue` action also records every value given, and the list is
+built from those. `tests/test_cli.py` checks that `main()` hands out the same list.
 
 argparse prints its own errors to stderr, outside logging.
 `SafeArgumentParser` keeps only the option strings it defines visible
