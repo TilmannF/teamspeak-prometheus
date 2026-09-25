@@ -350,3 +350,22 @@ def test_no_file_refers_to_the_old_default_branch():
     ]
 
     assert stale == []
+
+
+# -- dependency updates keep the declared ranges ---------------------------------
+
+
+def test_dependabot_moves_python_ranges_only_when_it_must():
+    config = yaml.safe_load((ROOT / '.github' / 'dependabot.yml').read_text())
+    (pip,) = [u for u in config['updates'] if u['package-ecosystem'] == 'pip']
+
+    assert pip['versioning-strategy'] == 'increase-if-necessary'
+
+
+def test_the_runtime_floor_is_still_the_tested_one():
+    # requirements.txt documents the oldest verified prometheus_client; a
+    # floor raised without re-verifying would make that claim stale
+    requirements = (ROOT / 'requirements.txt').read_text()
+
+    assert 'prometheus_client>=0.7.1,<1.0' in requirements
+    assert '0.7.1' in requirements.split('prometheus_client')[0]
