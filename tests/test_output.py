@@ -107,29 +107,89 @@ def _is_literal_text(node: ast.expr) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
-def forwarding_calls(path: Path, helper: str) -> list[str]:
-    """Calls of ``self.<helper>(reason, template, ...)`` with a runtime template."""
+def forwarding_helpers(paths: list[Path]) -> dict[str, tuple[int, str]]:
+    """Functions that log with a template they were handed.
 
-    offenders = []
-    for node in ast.walk(ast.parse(path.read_text(), str(path))):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == helper
-            and len(node.args) >= 2
-            and not (
-                isinstance(node.args[1], ast.Constant)
-                and isinstance(node.args[1].value, str)
+    ``def _failed(self, reason, message, *args): log.error(message, *args)``
+    forwards its ``message`` parameter as the template; the log-call scan
+    allows that, so every call of such a helper must pass a literal instead.
+    Returns name -> (position among the call's arguments, parameter name).
+    """
+
+    helpers: dict[str, tuple[int, str]] = {}
+    for path in paths:
+        for function in ast.walk(ast.parse(path.read_text(), str(path))):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            parameters = [a.arg for a in function.args.posonlyargs + function.args.args]
+            for node in _own_nodes(function):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in LOG_METHODS
+                    and is_logger(node.func.value)
+                    and node.args
+                ):
+                    template = node.args[1] if node.func.attr == 'log' else node.args[0]
+                    if isinstance(template, ast.Name) and template.id in parameters:
+                        position = parameters.index(template.id)
+                        if parameters and parameters[0] in ('self', 'cls'):
+                            position -= 1  # not passed at the call site
+                        helpers[function.name] = (position, template.id)
+    return helpers
+
+
+def _own_nodes(function: ast.AST):
+    """The nodes of ``function`` itself, not of functions nested in it."""
+
+    for child in ast.iter_child_nodes(function):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        yield child
+        yield from _own_nodes(child)
+
+
+def helper_calls(
+    paths: list[Path], helpers: dict[str, tuple[int, str]]
+) -> tuple[int, list[str]]:
+    """How many calls of the helpers there are, and those whose template is
+    not a string literal."""
+
+    checked, offenders = 0, []
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text(), str(path))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, 'id', None)
             )
-        ):
-            offenders.append(f'{path.name}:{node.lineno}: {ast.unparse(node.args[1])}')
-    return offenders
+            if name not in helpers:
+                continue
+            position, keyword = helpers[name]
+            template = next((k.value for k in node.keywords if k.arg == keyword), None)
+            if template is None and position < len(node.args):
+                template = node.args[position]
+            if template is None:
+                continue
+            checked += 1
+            if not _is_literal_text(template):
+                offenders.append(f'{path.name}:{node.lineno}: {ast.unparse(template)}')
+    return checked, offenders
 
 
 def test_the_scan_sees_the_whole_repository():
+    # A scan over nothing passes: every module must actually be in it.
     names = {path.relative_to(REPOSITORY).as_posix() for path in python_files()}
+    package = {
+        path.relative_to(REPOSITORY).as_posix()
+        for path in (REPOSITORY / 'teamspeak_prometheus').glob('*.py')
+    }
 
-    assert {'app.py', 'healthcheck.py', 'tests/exporter_harness.py'} <= names
+    assert len(package) >= 10
+    assert package | {'app.py', 'healthcheck.py', 'tests/exporter_harness.py'} <= names
 
 
 def test_no_log_template_is_built_at_runtime():
@@ -138,8 +198,68 @@ def test_no_log_template_is_built_at_runtime():
     assert offenders == [], 'pass values as logging arguments, see AGENTS.md'
 
 
-def test_the_poll_error_helper_is_only_given_literal_templates():
-    assert forwarding_calls(REPOSITORY / 'app.py', '_failed') == []
+def test_every_forwarded_template_is_a_literal_at_its_call_sites():
+    files = python_files()
+    helpers = forwarding_helpers(files)
+
+    checked, offenders = helper_calls(files, helpers)
+
+    # not vacuous: the known helper and its callers are found
+    assert '_failed' in helpers
+    assert checked >= 3
+    assert offenders == [], 'pass a literal template, see AGENTS.md'
+
+
+def scan_sample(tmp_path: Path, source: str) -> tuple[int, list[str]]:
+    path = tmp_path / 'sample.py'
+    path.write_text(source)
+    return helper_calls([path], forwarding_helpers([path]))
+
+
+@pytest.mark.parametrize(
+    ('source', 'expected_offenders'),
+    [
+        (
+            'class S:\n'
+            '    def _warn(self, reason, message, *a):\n'
+            '        log.warning(message, *a)\n'
+            '    def poll(self):\n'
+            "        self._warn('x', 'fixed %s', 1)\n"
+            "        self._warn('x', f'built {y}')\n",
+            1,
+        ),
+        (
+            'def note(template, *a):\n'
+            '    log.info(template, *a)\n'
+            "note('fixed')\n"
+            'note(text)\n'
+            "note(template=f'{y}')\n",
+            2,
+        ),
+        (
+            'def outer(message):\n'
+            '    def inner():\n'
+            "        log.info('fixed %s', message)\n"
+            '    return inner\n'
+            "outer(f'{y}')\n",
+            0,  # message is an argument, not the template: not a helper
+        ),
+    ],
+    ids=['method', 'function-and-keyword', 'nested-not-a-helper'],
+)
+def test_the_forwarding_scan_catches_runtime_templates(
+    tmp_path, source, expected_offenders
+):
+    _, offenders = scan_sample(tmp_path, source)
+
+    assert len(offenders) == expected_offenders
+
+
+def test_an_entry_point_alone_would_prove_nothing():
+    # What the check used to scan after the package split: no helper, no call.
+    entry_point = [REPOSITORY / 'app.py']
+
+    assert helper_calls(entry_point, forwarding_helpers(entry_point)) == (0, [])
 
 
 @pytest.mark.parametrize(

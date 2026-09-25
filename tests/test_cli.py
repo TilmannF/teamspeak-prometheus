@@ -251,9 +251,15 @@ def plain_parsers(path: Path) -> list[int]:
 
 
 def test_the_scan_sees_the_whole_repository():
+    # A scan over nothing passes: every module must actually be in it.
     names = {path.relative_to(REPOSITORY).as_posix() for path in python_files()}
+    package = {
+        path.relative_to(REPOSITORY).as_posix()
+        for path in (REPOSITORY / 'teamspeak_prometheus').glob('*.py')
+    }
 
-    assert {'app.py', 'healthcheck.py', 'tests/exporter_harness.py'} <= names
+    assert len(package) >= 10
+    assert package | {'app.py', 'healthcheck.py', 'tests/exporter_harness.py'} <= names
     assert not any(name.startswith('.venv/') for name in names)
 
 
