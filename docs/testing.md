@@ -83,10 +83,11 @@ Replace `virtualserver_unique_identifier` before committing.
 
 ## The container test
 
-`make docker-test` builds the image and starts it nine ways — default,
+`make docker-test` builds the image and starts it eleven ways — default,
 `METRICS_PORT`, `--metricsport` in the command, behind `--init`, behind
 `sh -c`, env and flag both set, with an unreachable HTTP proxy in the
-environment, with the password equal to the metrics port, and without an
+environment, with the password equal to the metrics port, with variables set
+inline in the command (as PID 1 and as a child of the shell), and without an
 exporter — then waits for Docker's verdict on each. All but the last must turn
 healthy, the last unhealthy, and neither the health log nor the container log
 may contain the password, not even where it equals the port. CI

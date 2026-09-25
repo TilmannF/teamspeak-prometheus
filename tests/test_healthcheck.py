@@ -16,8 +16,13 @@ OWN_PID = 999_999
 SECRET = 'not-to-be-printed'
 
 
-def fake_proc(tmp_path: Path, processes: dict[int, list[str] | None]) -> Path:
-    """Build ``<pid>/cmdline`` files; ``None`` makes an unreadable entry."""
+def fake_proc(
+    tmp_path: Path,
+    processes: dict[int, list[str] | None],
+    environ: dict[int, dict[str, str]] | None = None,
+) -> Path:
+    """Build ``<pid>/cmdline`` files, and ``<pid>/environ`` for the pids in
+    ``environ``; ``None`` as argv makes an unreadable entry."""
 
     proc = tmp_path / 'proc'
     proc.mkdir()
@@ -29,6 +34,12 @@ def fake_proc(tmp_path: Path, processes: dict[int, list[str] | None]) -> Path:
             (entry / 'cmdline').write_bytes(
                 b'\0'.join(a.encode() for a in argv) + b'\0'
             )
+    for pid, variables in (environ or {}).items():
+        (proc / str(pid) / 'environ').write_bytes(
+            b''.join(
+                f'{key}={value}'.encode() + b'\0' for key, value in variables.items()
+            )
+        )
     return proc
 
 
@@ -282,3 +293,88 @@ def test_every_repeated_password_of_the_exporter_is_a_secret(tmp_path):
     )
 
     assert set(healthcheck.exporter_secrets({}, proc)) == {'9100', 'x'}
+
+
+# -- the exporter's own environment: variables set in its command line ---------
+
+
+EXPORTER = ['python', '/app/app.py']
+
+
+def test_the_port_comes_from_the_exporters_own_environment(tmp_path):
+    # sh -c 'METRICS_PORT=9100 exec python /app/app.py': the healthcheck's
+    # environment (the container config) does not have it
+    proc = fake_proc(tmp_path, {1: EXPORTER}, environ={1: {'METRICS_PORT': '9100'}})
+    probed: list[int] = []
+
+    healthcheck.check({}, proc, probed.append)
+
+    assert probed == [9100]
+
+
+def test_the_exporters_environment_wins_over_the_healthchecks(tmp_path):
+    proc = fake_proc(tmp_path, {1: EXPORTER}, environ={1: {'METRICS_PORT': '9100'}})
+    probed: list[int] = []
+
+    healthcheck.check({'METRICS_PORT': '9200'}, proc, probed.append)
+
+    assert probed == [9100]
+
+
+def test_env_and_flags_of_the_exporter_combine_with_env_precedence(tmp_path):
+    proc = fake_proc(
+        tmp_path,
+        {1: [*EXPORTER, '--metricsport', '9300']},
+        environ={1: {'METRICS_PORT': '9100'}},
+    )
+    probed: list[int] = []
+
+    healthcheck.check({}, proc, probed.append)
+
+    assert probed == [9100]
+
+
+def test_an_unreadable_environment_falls_back_to_the_healthchecks(tmp_path):
+    proc = fake_proc(tmp_path, {1: EXPORTER})  # no environ file
+    probed: list[int] = []
+
+    healthcheck.check({'METRICS_PORT': '9200'}, proc, probed.append)
+
+    assert probed == [9200]
+
+
+def test_the_exporters_environment_is_parsed_like_procfs_writes_it(tmp_path):
+    proc = fake_proc(
+        tmp_path,
+        {1: EXPORTER},
+        environ={1: {'A': 'x=y', 'EMPTY': '', 'METRICS_PORT': '9100'}},
+    )
+
+    exporter = healthcheck.find_exporter(proc, own_pid=OWN_PID)
+
+    assert exporter is not None
+    assert exporter.env == {'A': 'x=y', 'EMPTY': '', 'METRICS_PORT': '9100'}
+
+
+def test_a_password_in_the_exporters_environment_is_censored(tmp_path, capsys):
+    proc = fake_proc(
+        tmp_path,
+        {1: EXPORTER},
+        environ={1: {'METRICS_PORT': '9100', 'TEAMSPEAK_PASSWORD': '9100'}},
+    )
+
+    healthcheck.main(env={}, proc=proc, prober=lambda port: None)
+
+    out = capsys.readouterr().out
+    assert '9100' not in out
+    assert '*censored*' in out
+
+
+def test_both_environments_passwords_are_secrets(tmp_path):
+    proc = fake_proc(
+        tmp_path, {1: EXPORTER}, environ={1: {'TEAMSPEAK_PASSWORD': 'exporter'}}
+    )
+
+    secrets = healthcheck.exporter_secrets({'TEAMSPEAK_PASSWORD': 'container'}, proc)
+
+    assert set(secrets) == {'exporter', 'container'}

@@ -33,7 +33,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
   match `__version__`, or has no CHANGELOG section. A manually started run
   only builds; only a validated tag push publishes.
 - Container `HEALTHCHECK` that probes `/metrics` on the port the exporter
-  actually uses (`METRICS_PORT` or `--metricsport`), never through a proxy
+  actually uses (`METRICS_PORT` or `--metricsport`, also when set inline in
+  the container command), never through a proxy
   from the environment, and deliberately does not depend on TeamSpeak being
   reachable. Its output is censored like the exporter's log.
 - Multi-architecture (`linux/amd64`, `linux/arm64`) container images, published

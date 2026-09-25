@@ -184,10 +184,11 @@ probing `METRICS_PORT` (or 8000) alone would declare an exporter started with
 `healthcheck.py` closes that gap without duplicating any configuration logic:
 
 ```text
-exporter_argv(/proc)        every /proc/<pid>/cmdline, lowest PID first,
-                            skipping itself; the arguments after app.py
-metrics_port(argv, env)     app.parse_args + app.resolve_config:
-                            the exporter's own precedence rules
+find_exporter(/proc)        every /proc/<pid>/cmdline, lowest PID first,
+                            skipping itself; the arguments after app.py,
+                            and the exporter's own /proc/<pid>/environ
+metrics_port(argv, env)     app.parse_args + app.resolve_config with the
+                            exporter's environment: its precedence rules
 probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout,
                             never through a proxy
 ```
@@ -195,6 +196,10 @@ probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout,
 * All processes are searched, not only PID 1, so `docker run --init` and
   `sh -c` wrappers work. A shell's `-c` string is one argument and does not
   match; its child does.
+* The environment is the exporter's own, read from `/proc/<pid>/environ`: a
+  variable set in the command (`sh -c 'METRICS_PORT=9100 exec python app.py'`)
+  is not in the container configuration the healthcheck inherits. If it cannot
+  be read, the healthcheck's own environment is used.
 * Without an exporter process (a replaced container command) the port comes
   from the environment alone, like an exporter started without flags.
 * The exporter's command line may contain `--ts3password`. argparse error

@@ -83,6 +83,11 @@ start behind-proxy -e http_proxy=http://127.0.0.1:1 -e HTTP_PROXY=http://127.0.0
 # The password is the metrics port: healthcheck and exporter both print that
 # number, and both must censor it.
 start password-is-port -e METRICS_PORT=9400 -e TEAMSPEAK_PASSWORD=9400 --
+# Variables set in the command line, not the container config: only the
+# exporter's own environment has them. With exec the exporter is PID 1; without
+# it, a child of the shell.
+start inline-env -- sh -c 'METRICS_PORT=9500 TEAMSPEAK_PASSWORD=9500 exec python /app/app.py'
+start inline-env-child -- sh -c 'export METRICS_PORT=9600; python /app/app.py; true'
 start no-exporter -- sleep 300
 
 expect default healthy
@@ -93,6 +98,8 @@ expect shell-wrapper healthy
 expect env-beats-flag healthy
 expect behind-proxy healthy
 expect password-is-port healthy
+expect inline-env healthy
+expect inline-env-child healthy
 expect no-exporter unhealthy
 
 # never_printed NAME VALUE: neither the health log nor the container log may
@@ -110,6 +117,7 @@ never_printed() {
 }
 
 never_printed password-is-port 9400
+never_printed inline-env 9500
 never_printed metrics-port-flag "$SECRET"
 
 # stopped NAME: docker stop must finish fast with exit code 0 and a clean log.

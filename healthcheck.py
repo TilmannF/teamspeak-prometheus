@@ -28,6 +28,7 @@ import io
 import os
 import urllib.request
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import app
@@ -41,12 +42,25 @@ class HealthcheckError(Exception):
     """The exporter's metrics endpoint could not be located or reached."""
 
 
-def exporter_argv(proc: Path = PROC, own_pid: int | None = None) -> list[str] | None:
-    """Arguments after ``app.py`` of the running exporter, or ``None``.
+@dataclass(frozen=True)
+class Exporter:
+    """The running exporter, as ``/proc`` shows it."""
+
+    argv: list[str]  # the arguments after app.py
+    env: dict[str, str] | None  # None if its environment is unreadable
+
+
+def find_exporter(proc: Path = PROC, own_pid: int | None = None) -> Exporter | None:
+    """The running exporter's arguments and environment, or ``None``.
 
     Every process is searched, not just PID 1: with ``docker run --init`` or a
     ``sh -c`` wrapper the exporter is a child process. If several match, the
     lowest PID wins.
+
+    The environment matters as much as the arguments: ``sh -c 'METRICS_PORT=9100
+    exec python app.py'`` sets a variable the healthcheck, which only inherits
+    the container configuration, never sees. It runs as the same user as the
+    exporter, so ``/proc/<pid>/environ`` is readable.
     """
 
     own_pid = os.getpid() if own_pid is None else own_pid
@@ -61,13 +75,47 @@ def exporter_argv(proc: Path = PROC, own_pid: int | None = None) -> list[str] | 
             raw = (entry / 'cmdline').read_bytes()
         except OSError:  # exited meanwhile, a kernel thread, or not ours
             continue
-        args = raw.decode('utf-8', errors='replace').split('\0')
-        if args and args[-1] == '':
-            args.pop()
+        args = _nul_separated(raw)
         for index, arg in enumerate(args):
             if Path(arg).name == EXPORTER_SCRIPT:
-                return args[index + 1 :]
+                return Exporter(args[index + 1 :], _environment(entry))
     return None
+
+
+def exporter_argv(proc: Path = PROC, own_pid: int | None = None) -> list[str] | None:
+    """Arguments after ``app.py`` of the running exporter, or ``None``."""
+
+    exporter = find_exporter(proc, own_pid)
+    return None if exporter is None else exporter.argv
+
+
+def _nul_separated(raw: bytes) -> list[str]:
+    fields = raw.decode('utf-8', errors='replace').split('\0')
+    if fields and fields[-1] == '':
+        fields.pop()
+    return fields
+
+
+def _environment(entry: Path) -> dict[str, str] | None:
+    try:
+        raw = (entry / 'environ').read_bytes()
+    except OSError:
+        return None
+    return dict(
+        field.partition('=')[::2] for field in _nul_separated(raw) if '=' in field
+    )
+
+
+def effective(
+    env: Mapping[str, str], proc: Path = PROC
+) -> tuple[list[str], Mapping[str, str]]:
+    """The exporter's arguments, and the environment it actually runs with:
+    its own if readable, else the healthcheck's (the container config)."""
+
+    exporter = find_exporter(proc)
+    if exporter is None:
+        return [], env
+    return exporter.argv, env if exporter.env is None else exporter.env
 
 
 def metrics_port(argv: list[str], env: Mapping[str, str]) -> int:
@@ -124,8 +172,8 @@ def check(
     an exporter started without flags.
     """
 
-    argv = exporter_argv(proc)
-    port = metrics_port(argv or [], env)
+    argv, exporter_env = effective(env, proc)
+    port = metrics_port(argv, exporter_env)
     prober(port)
     return port
 
@@ -137,15 +185,20 @@ def exporter_secrets(env: Mapping[str, str], proc: Path = PROC) -> list[str]:
     be the password, so it is censored like the exporter's log.
     """
 
+    argv, exporter_env = effective(env, proc)
     try:
         with (
             contextlib.redirect_stderr(io.StringIO()),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            args = app.parse_args(exporter_argv(proc) or [])
+            args = app.parse_args(argv)
     except SystemExit:
         args = argparse.Namespace()
-    return app.secrets_for_redaction(app.password_candidates(args, env))
+    # The exporter's passwords, and the container's too: both are secrets.
+    return app.secrets_for_redaction(
+        app.password_candidates(args, exporter_env)
+        + app.password_candidates(argparse.Namespace(), env)
+    )
 
 
 def main(
