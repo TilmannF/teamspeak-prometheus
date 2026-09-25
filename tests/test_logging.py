@@ -275,3 +275,64 @@ def test_no_secret_survives_redaction_fuzzed():
             output = redacted(text, *secrets)
             leaked = [s for s in secrets if s in output]
             assert not leaked, (text, secrets, output)
+
+
+# -- passwords with control characters: censored before escaping --------------
+
+
+def escaped_form(text: str) -> str:
+    """What the filter's escaping turns ``text`` into."""
+
+    return str(app.RedactingFilter.escape(text))
+
+
+@pytest.mark.parametrize(
+    'secret',
+    ['alpha\nbeta', 'tab\tbed', 'esc\x1b[0m', 'line sep', 'next\x85line', '\n'],
+    ids=['newline', 'tab', 'escape-sequence', 'line-separator', 'c1', 'only-newline'],
+)
+def test_a_password_with_a_control_character_is_censored_in_any_form(secret):
+    output = filtered(
+        'ServerQuery error: %s', f'login failed: {secret}', secrets=[secret]
+    )
+
+    assert secret not in output
+    assert escaped_form(secret) not in output
+    assert '*censored*' in output
+
+
+def test_a_password_that_escaping_would_form_is_censored():
+    # the password is literally backslash-n; the server sends a real line
+    # break, which escaping turns into exactly the password
+    secret = 'alpha\\nbeta'
+
+    output = filtered('error: %s', 'alpha\nbeta', secrets=[secret])
+
+    assert secret not in output
+
+
+def test_a_password_with_a_control_character_is_censored_in_a_traceback():
+    secret = 'alpha\nbeta'
+    try:
+        raise RuntimeError(f'boom {secret}')
+    except RuntimeError:
+        output = filtered(
+            'Unexpected error during poll', exc_info=sys.exc_info(), secrets=[secret]
+        )
+
+    assert secret not in output
+    assert escaped_form(secret) not in output
+
+
+def test_no_form_of_a_secret_survives_the_filter_fuzzed():
+    rng = random.Random(20260925)
+    alphabet = 'ab\n\\n\t\x1b*'
+    for _ in range(3_000):
+        secrets = [
+            ''.join(rng.choice(alphabet) for _ in range(rng.randint(1, 4)))
+            for _ in range(rng.randint(1, 2))
+        ]
+        argument = ''.join(rng.choice(alphabet) for _ in range(rng.randint(0, 20)))
+        output = filtered('echo: %s', argument, secrets=secrets)
+        leaked = [s for s in secrets if s in output or escaped_form(s) in output]
+        assert not leaked, (argument, secrets, output)

@@ -1165,10 +1165,20 @@ class RedactingFilter(logging.Filter):
 
     def __init__(self, secrets: list[str]) -> None:
         super().__init__()
-        self.secrets = secrets_for_redaction(secrets)
+        # A secret with a control character also has an escaped form (a line
+        # break as backslash-n), which reads exactly like it in a log line.
+        # Both forms are censored.
+        self.secrets = secrets_for_redaction(
+            [*secrets, *(str(self.escape(secret)) for secret in secrets)]
+        )
 
     def redact(self, text: str) -> str:
         return redact(text, self.secrets)
+
+    def clean(self, value: object) -> object:
+        if isinstance(value, (int, float)):
+            return value
+        return self.escape(self.redact(str(value)))
 
     @staticmethod
     def escape(value: object) -> object:
@@ -1179,10 +1189,14 @@ class RedactingFilter(logging.Filter):
         )
 
     def filter(self, record: logging.LogRecord) -> bool:
+        # Censor each argument before escaping it -- escaping would change a
+        # secret with a control character so the raw form no longer matches --
+        # then censor the finished line again: formatting or escaping can
+        # assemble a secret that no single argument contained.
         if isinstance(record.args, Mapping):
-            record.args = {key: self.escape(v) for key, v in record.args.items()}
+            record.args = {key: self.clean(v) for key, v in record.args.items()}
         elif record.args:
-            record.args = tuple(self.escape(arg) for arg in record.args)
+            record.args = tuple(self.clean(arg) for arg in record.args)
         try:
             message = record.getMessage()
         except (TypeError, ValueError, KeyError):

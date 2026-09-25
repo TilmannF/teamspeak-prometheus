@@ -70,7 +70,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
   censored from every finished log line — also where it coincides with a
   number such as the metrics port — tracebacks included, and from virtualserver
   names before they become labels; control characters in log lines are
-  escaped so server text cannot forge log lines.
+  escaped so server text cannot forge log lines. A password containing a
+  control character is censored before escaping, and in its escaped form.
 
 ### Fixed
 

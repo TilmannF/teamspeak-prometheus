@@ -851,3 +851,27 @@ def test_the_harness_serves_metrics_on_loopback_only(exporter):
 
     with pytest.raises(requests.ConnectionError):
         HTTP.get(f'http://{address}:{port}/metrics', timeout=2)
+
+
+@pytest.mark.parametrize(
+    'submitted',
+    [f'wrong\n{PASSWORD}', f'wrong\t{PASSWORD}', f'wrong\x1b[31m{PASSWORD}'],
+    ids=['newline', 'tab', 'escape-sequence'],
+)
+def test_a_password_with_a_control_character_never_reaches_the_log(submitted):
+    # The hostile server rejects the login and echoes the submitted password;
+    # the exporter must censor it before escaping the control character.
+    with FakeTs3Server(password=PASSWORD, hostile=True) as server:
+        output = run_app(
+            {
+                'TEAMSPEAK_HOST': server.host,
+                'TEAMSPEAK_PORT': str(server.port),
+                'TEAMSPEAK_PASSWORD': submitted,
+            },
+            re.compile(r'poll_errors_total\{reason="login"\} [1-9]'),
+        )
+
+    escaped = str(app.RedactingFilter.escape(submitted))
+    assert submitted not in output
+    assert escaped not in output
+    assert 'invalid password *censored*' in output

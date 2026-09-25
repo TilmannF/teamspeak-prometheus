@@ -114,10 +114,14 @@ server could echo the password it was just sent, or embed line breaks to forge
 log lines. `main()` installs a `RedactingFilter` on the exporter's logger,
 which on every record
 
-* escapes control characters (line breaks, terminal escapes, C1 codes, Unicode
-  line separators) in string arguments, so one log call is always one line;
+* censors each string argument, then escapes its control characters (line
+  breaks, terminal escapes, C1 codes, Unicode line separators), so one log call
+  is always one line. Censoring comes first: escaping would turn a password
+  containing a line break into backslash-n, which the raw password no longer
+  matches — yet reads exactly like it;
 * formats the message, then replaces the password with `*censored*` in the
-  finished text and in any traceback. Censoring the finished text also catches
+  finished text and in any traceback — the raw password and its escaped form
+  alike, and also where formatting or escaping assembled one. Censoring the finished text also catches
   a number that happens to be the password (`TEAMSPEAK_PASSWORD=8000` with the
   default metrics port 8000) and a secret split across template and argument.
 
