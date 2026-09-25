@@ -68,9 +68,16 @@ this handling existed, it silently skipped the rest of the virtualservers.
 Flooding on regardless gets the IP banned, after which TeamSpeak closes new
 connections without a greeting.
 
-Every read has a 10s socket timeout, and a whole session has a 60s deadline
-(`POLL_TIMEOUT_IN_SECONDS`): a server trickling bytes or sending notifications
-without end cannot stall a poll, because each read is bounded by the time left.
+Every read has a 10s socket timeout, and a whole session has a deadline: a
+server trickling bytes or sending notifications without end cannot stall a
+poll, because each read is bounded by the time left. The deadline starts at
+60s (`POLL_TIMEOUT_IN_SECONDS`) and grows once `serverlist` shows how much work
+there is: 5s per online virtualserver (`PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS`),
+capped at 15 minutes (`MAX_SESSION_TIMEOUT_IN_SECONDS`). A throttled,
+non-allowlisted host needs about 0.6s per virtualserver, so with a fixed 60s a
+host of 150 ran out part-way — every poll, at the same place, so the ones at
+the end were never read. The cap keeps a hostile server from buying hours by
+listing thousands.
 A flood wait that would cross the deadline is not slept. Lines longer than 1 MiB
 (`MAX_LINE_BYTES`) are rejected. An `error` trailer without a numeric id is a
 protocol error, not success.

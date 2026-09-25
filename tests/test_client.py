@@ -325,3 +325,103 @@ def test_an_error_line_without_a_numeric_id_is_not_success(trailer: bytes):
 
     assert caught.value.error_id == -1
     assert 'malformed response' in str(caught.value)
+
+
+# -- the session budget scales with the number of virtualservers ---------------
+
+
+def serverlist_reply(count: int, status: str = 'online') -> bytes:
+    records = b'|'.join(
+        b'virtualserver_id=%d virtualserver_status=%s' % (sid, status.encode())
+        for sid in range(1, count + 1)
+    )
+    return records + b'\n\r' + OK
+
+
+def throttled_session(count: int, seconds_per_recv: float, status: str = 'online'):
+    """A session that lists ``count`` virtualservers, each pair of use and
+    serverinfo taking ``3 * seconds_per_recv`` -- TeamSpeak's default flood
+    pace is about 0.6s per pair for a client not on the allowlist."""
+
+    clock = FakeClock()
+    replies = [BANNER, OK, serverlist_reply(count, status)]
+    replies += [OK, b'virtualserver_name=x\n\r', OK] * count
+    connection = FakeConnection(
+        *replies, clock=clock, seconds_per_recv=seconds_per_recv
+    )
+    return app.ServerQueryClient(connection, sleep=clock.sleep, clock=clock), clock
+
+
+def read_all(query: app.ServerQueryClient) -> int:
+    query.login('serveradmin', 'x')
+    read = 0
+    for server in query.serverlist():
+        query.use(server['virtualserver_id'])
+        query.serverinfo()
+        read += 1
+    return read
+
+
+def test_a_large_throttled_host_is_read_completely():
+    # 150 virtualservers at 0.6s each: past the 60s base budget
+    query, clock = throttled_session(150, seconds_per_recv=0.2)
+
+    assert read_all(query) == 150
+    assert clock.now > app.POLL_TIMEOUT_IN_SECONDS
+
+
+def test_the_budget_grows_per_online_virtualserver():
+    query, clock = throttled_session(3, seconds_per_recv=0)
+    query.login('serveradmin', 'x')
+    query.serverlist()
+
+    clock.now = (
+        app.POLL_TIMEOUT_IN_SECONDS + 3 * app.PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS - 1
+    )
+    query.use(1)  # still inside the budget
+
+    clock.now += 2
+    with pytest.raises(TimeoutError, match='75s'):
+        query.use(2)
+
+
+def test_virtualservers_that_are_not_online_add_no_budget():
+    query, clock = throttled_session(100, seconds_per_recv=0, status='offline')
+    query.login('serveradmin', 'x')
+    query.serverlist()
+
+    clock.now = app.POLL_TIMEOUT_IN_SECONDS + 1
+    with pytest.raises(TimeoutError):
+        query.use(1)
+
+
+def test_the_budget_is_capped_however_many_virtualservers_are_listed():
+    # A hostile server listing thousands must not buy itself hours.
+    query, clock = throttled_session(3_000, seconds_per_recv=0)
+    query.login('serveradmin', 'x')
+    query.serverlist()
+
+    clock.now = app.MAX_SESSION_TIMEOUT_IN_SECONDS - 1
+    query.use(1)
+
+    clock.now = app.MAX_SESSION_TIMEOUT_IN_SECONDS + 1
+    with pytest.raises(TimeoutError, match=f'{app.MAX_SESSION_TIMEOUT_IN_SECONDS:g}s'):
+        query.use(2)
+
+
+def test_a_trickling_server_is_still_cut_off_after_the_serverlist():
+    clock = FakeClock()
+    connection = FakeConnection(
+        BANNER,
+        OK,
+        serverlist_reply(2),
+        endless=itertools.repeat(b'x'),
+        clock=clock,
+        seconds_per_recv=1,
+    )
+    query = app.ServerQueryClient(connection, sleep=clock.sleep, clock=clock)
+    query.login('serveradmin', 'x')
+    query.serverlist()
+
+    with pytest.raises(TimeoutError, match='70s'):
+        query.use(1)

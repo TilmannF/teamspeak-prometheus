@@ -99,12 +99,12 @@ readable by the same user, root, or `docker inspect` on the container.
 
 TeamSpeak throttles query clients that are not on its allowlist — by default
 10 commands per 3 seconds. One poll needs `3 + 2 × virtualservers` commands.
-The exporter waits and retries when throttled, but on a host with several
-virtualservers — or a short poll interval: with one virtualserver, anything
-under 1.5 seconds is throttled — add the
-exporter's IP to `query_ip_allowlist.txt` on the TeamSpeak server. If TeamSpeak has already banned the IP, the exporter logs
-`closed the connection before greeting` until the ban expires (default 10
-minutes).
+The exporter waits and retries when throttled, but that is slow: with one
+virtualserver, a poll interval under 1.5 seconds is throttled, and with a
+hundred virtualservers one poll takes about a minute. Add the exporter's IP to
+`query_ip_allowlist.txt` on the TeamSpeak server. If TeamSpeak has already
+banned the IP, the exporter logs `closed the connection before greeting` until
+the ban expires (default 10 minutes).
 
 ## Deployment
 

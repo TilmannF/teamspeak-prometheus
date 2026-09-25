@@ -875,3 +875,24 @@ def test_a_password_with_a_control_character_never_reaches_the_log(submitted):
     assert submitted not in output
     assert escaped not in output
     assert 'invalid password *censored*' in output
+
+
+def test_a_throttled_host_is_read_completely_past_the_base_budget():
+    # 20 virtualservers need 43 commands; at 10 per second the fake throttles
+    # for about 4s -- more than the deliberately short 2s base budget.
+    with FakeTs3Server(
+        password=PASSWORD, virtualserver_count=20, flood_limit=10, flood_window=1
+    ) as server:
+        client = app.ServerQueryClient.connect(
+            server.host, server.port, session_timeout=2
+        )
+        try:
+            client.login('serveradmin', PASSWORD)
+            listed = client.serverlist()
+            for entry in listed:
+                client.use(entry['virtualserver_id'])
+                client.serverinfo()
+        finally:
+            client.close()
+
+    assert len(listed) == 20

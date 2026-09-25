@@ -85,8 +85,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
 - Series of removed virtualservers are dropped instead of keeping their last
   value until restart.
 - ServerQuery reads have a 10-second timeout instead of none, and a whole
-  session a 60-second deadline, so a server that trickles data or never ends
-  a line cannot stall the exporter.
+  session a deadline — 60 seconds plus 5 per online virtualserver, at most 15
+  minutes — so a server that trickles data or never ends a line cannot stall
+  the exporter, while a large throttled host is still read completely.
 - Stopped virtualservers are skipped instead of failing every poll.
 - The exporter stops cleanly on SIGTERM. As PID 1 in the container it used to
   ignore it, so `docker stop` waited 10 seconds and killed it.

@@ -54,6 +54,13 @@ SERVERQUERY_TIMEOUT_IN_SECONDS = 10.0
 # bound a poll: a server trickling a byte at a time, or sending notifications
 # without end, never lets a single read time out.
 POLL_TIMEOUT_IN_SECONDS = 60.0
+# Once serverlist shows how much work the session has, the budget grows by this
+# much per online virtualserver: a host that is not on the allowlist is
+# throttled to about 0.6s per virtualserver, so 150 of them need more than 60s.
+PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS = 5.0
+# ... but never beyond this: a hostile server listing thousands of
+# virtualservers must not buy itself hours.
+MAX_SESSION_TIMEOUT_IN_SECONDS = 900.0
 # Longest response line accepted. A real serverinfo line is about 4 KiB and a
 # serverlist line about 300 bytes per virtualserver.
 MAX_LINE_BYTES = 1024 * 1024
@@ -240,8 +247,8 @@ class ServerQueryClient:
         self._connection = connection
         self._sleep = sleep
         self._clock = clock
-        self._timeout = timeout
-        self._deadline = clock() + timeout
+        self._started = clock()
+        self._deadline = self._started + timeout
         self._buffer = b''
         # The server greets with two lines: ``TS3`` and a welcome text. A server
         # that has banned this IP (flooding, failed logins) or reached its
@@ -287,7 +294,26 @@ class ServerQueryClient:
             raise LoginFailed(err.command, err.error_id, err.message) from None
 
     def serverlist(self) -> list[dict[str, str | None]]:
-        return self.command('serverlist')
+        """List the virtualservers, and grow the session budget to fit them.
+
+        Every online virtualserver adds ``PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS``
+        -- ones that are not online are skipped by the exporter and cost
+        nothing -- up to ``MAX_SESSION_TIMEOUT_IN_SECONDS`` in total. Without
+        this, a large throttled host ran out of budget part-way, every poll,
+        and the virtualservers after that point were never read.
+        """
+
+        records = self.command('serverlist')
+        online = sum(
+            1
+            for record in records
+            if record.get('virtualserver_status') in (None, 'online')
+        )
+        self._deadline = min(
+            self._deadline + online * PER_VIRTUALSERVER_TIMEOUT_IN_SECONDS,
+            self._started + MAX_SESSION_TIMEOUT_IN_SECONDS,
+        )
+        return records
 
     def use(self, virtualserver_id: object) -> None:
         self.command('use', sid=virtualserver_id)
@@ -361,9 +387,8 @@ class ServerQueryClient:
         return line.decode('utf-8', errors='replace')
 
     def _timed_out(self) -> TimeoutError:
-        return TimeoutError(
-            f'ServerQuery session did not finish within {self._timeout:g}s'
-        )
+        budget = self._deadline - self._started
+        return TimeoutError(f'ServerQuery session did not finish within {budget:g}s')
 
 
 def _error_id(command: str, error: Mapping[str, str | None]) -> int:
