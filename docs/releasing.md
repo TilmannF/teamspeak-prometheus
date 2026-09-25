@@ -22,9 +22,9 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    section, dated, with a link reference at the bottom of the file. Set
    `__version__` in `teamspeak_prometheus/__init__.py` to `X.Y.Z` — it is what
    `teamspeak_exporter_build_info` reports.
-2. Commit that on a branch, get it reviewed and merged to `master` like any
+2. Commit that on a branch, get it reviewed and merged to `main` like any
    other change.
-3. From `master`, tag and push. Release tags are exactly `vMAJOR.MINOR.PATCH`
+3. From `main`, tag and push. Release tags are exactly `vMAJOR.MINOR.PATCH`
    (no prerelease or build suffix, no leading zeros), equal to `v` +
    `__version__`, with a matching `## [X.Y.Z]` section in `CHANGELOG.md`.
    `.github/scripts/validate-release-tag.sh` checks all three first thing in
