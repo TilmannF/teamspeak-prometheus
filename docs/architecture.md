@@ -247,7 +247,11 @@ So `--ts3pasword <password>` reports
 `unrecognized arguments: … … (argument values hidden; see --help)`, while
 `argument --ts3port: expected one argument` stays readable. Only whole
 fragments are masked; a stray `3` leaves `--ts3port` intact. A *password*,
-though, is censored wherever it appears — in the message and in the usage line
-argparse prints with it — so a password that equals a flag name, or a password
-`3`, garbles the flag names shown. Censoring wins over readability. The test harness and the fake server use
-it too, and a test scans the repository for any parser that does not.
+though, is censored wherever it appears in anything argparse prints — the
+error message, the usage line printed with it, and `--help`, which prints
+directly and never passes through `error()`. `SafeArgumentParser` therefore
+censors in `print_help`, `print_usage` and `exit`, the three methods all
+argparse output goes through, so a password equal to a flag name, a default
+(`TEAMSPEAK_PASSWORD=8000` against `(default: 8000)`), or `3` garbles what is
+shown. Censoring wins over readability. The test harness and the fake server
+use it too, and a test scans the repository for any parser that does not.

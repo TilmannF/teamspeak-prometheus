@@ -64,8 +64,8 @@ It is the state as shipped: what a user gets if they pull this tag today.
   `unrecognized arguments: … …`. Configuration errors are censored like every
   other log line. Every password given — also one left on the command line
   while the environment overrides it, and every repeat of `--ts3password` — is
-  censored everywhere: logs, metric labels, command-line errors and their
-  usage line.
+  censored everywhere: logs, metric labels, and everything the command line
+  prints — errors, usage and `--help`.
 - Text from the TeamSpeak server is treated as untrusted: the password is
   censored from every finished log line — also where it coincides with a
   number such as the metrics port — tracebacks included, and from virtualserver

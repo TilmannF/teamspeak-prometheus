@@ -663,6 +663,18 @@ def tool_cases() -> list[tuple[str, list[str], dict[str, str], str]]:
             port,
         ),
         (
+            'exporter --help, environment password = a default',
+            ['app.py', '--help'],
+            {'TEAMSPEAK_PASSWORD': '8000'},
+            '8000',
+        ),
+        (
+            'exporter --help, flag password in the help text',
+            ['app.py', '--ts3password', '86400', '--help'],
+            {},
+            '86400',
+        ),
+        (
             'healthcheck, password = metrics port',
             ['healthcheck.py'],
             {'TEAMSPEAK_PASSWORD': port, 'METRICS_PORT': port},
@@ -763,6 +775,18 @@ def tool_cases() -> list[tuple[str, list[str], dict[str, str], str]]:
             ],
             {},
             port,
+        ),
+        (
+            'harness --help, password in the help text',
+            ['-m', 'tests.exporter_harness', '--ts3password', 'fake', '--help'],
+            {},
+            'fake',
+        ),
+        (
+            'fake server --help, password in the help text',
+            ['-m', 'tests.fake_ts3_server', '--password', 'docs/testing.md', '--help'],
+            {},
+            'docs/testing.md',
         ),
         (
             'fake server, mistyped flag with dash password',

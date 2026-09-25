@@ -420,3 +420,66 @@ def test_main_hands_every_repeated_password_to_every_censor(clean_env, monkeypat
     assert app.main(['--ts3password', 'first', '--ts3password', 'second']) == 0
 
     assert seen[-1] == seen[-2] == ['first', 'second']  # service, final filter
+
+
+# -- --help and everything else argparse prints are censored -------------------
+
+
+def help_output(argv: list[str], capsys, secrets: list[str] | None = None) -> str:
+    with pytest.raises(SystemExit) as caught:
+        app.parse_args(argv, secrets=secrets)
+    assert caught.value.code == 0
+    return capsys.readouterr().out
+
+
+def test_help_censors_an_environment_password_that_matches_a_default(capsys):
+    out = help_output(['--help'], capsys, secrets=['8000'])
+
+    assert '8000' not in out
+    assert '(default: *censored*)' in out
+
+
+@pytest.mark.parametrize(
+    'argv',
+    [
+        ['--ts3password', '86400', '--help'],
+        ['--help', '--ts3password', '86400'],
+        ['--ts3password=86400', '-h'],
+        ['--ts3pass', '86400', '--help'],
+    ],
+    ids=['before', 'after', 'equals', 'abbreviated'],
+)
+def test_help_censors_a_flag_password_that_matches_help_text(argv, capsys):
+    out = help_output(argv, capsys)
+
+    assert '86400' not in out
+    assert 'usage:' in out
+
+
+def test_help_is_unchanged_without_a_matching_password(capsys):
+    out = help_output(['--help'], capsys, secrets=['nothing-in-help'])
+
+    assert '(default: 8000)' in out
+    assert '*censored*' not in out
+
+
+@pytest.mark.parametrize(
+    ('tool', 'argv', 'secret'),
+    [
+        ('harness', ['--ts3password', 'fake', '--help'], 'fake'),
+        ('fake-server', ['--password', 'docs/testing.md', '--help'], 'docs/testing.md'),
+    ],
+)
+def test_the_test_tools_censor_their_help(tool, argv, secret, capsys):
+    from tests import exporter_harness, fake_ts3_server
+
+    main = {'harness': exporter_harness.main, 'fake-server': fake_ts3_server.main}[tool]
+
+    with pytest.raises(SystemExit) as caught:
+        main(argv)
+
+    assert caught.value.code == 0
+    out = capsys.readouterr().out
+    assert 'usage:' in out
+    assert secret not in out
+    assert '*censored*' in out  # the password did occur in the help text

@@ -464,15 +464,33 @@ class SafeArgumentParser(argparse.ArgumentParser):
         self._argv = list(sys.argv[1:] if args is None else args)
         return super().parse_known_args(args, namespace)
 
+    # Everything argparse prints goes through print_help, print_usage or exit
+    # (errors print the usage, then exit with the message; --help prints the
+    # help and exits). Censoring here covers all of it, whichever action
+    # prints: a password can equal a default in the help text or a flag name.
+
+    def print_help(self, file: Any = None) -> None:
+        self._print_message(
+            redact(self.format_help(), self._secrets()), file or sys.stdout
+        )
+
+    def print_usage(self, file: Any = None) -> None:
+        self._print_message(
+            redact(self.format_usage(), self._secrets()), file or sys.stdout
+        )
+
+    def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
+        super().exit(status, redact(message, self._secrets()) if message else None)
+
     def error(self, message: str) -> NoReturn:
-        # argparse.ArgumentParser.error, with the usage line and the message
-        # both censored: a password can equal a flag name the usage shows.
-        masked = _mask_values(message, self._argv, set(self._option_string_actions))
-        secrets = secrets_for_redaction(
+        super().error(
+            _mask_values(message, self._argv, set(self._option_string_actions))
+        )
+
+    def _secrets(self) -> list[str]:
+        return secrets_for_redaction(
             self.secrets + _option_values(self._argv, self.secret_options)
         )
-        self._print_message(redact(self.format_usage(), secrets), sys.stderr)
-        self.exit(2, redact(f'{self.prog}: error: {masked}\n', secrets))
 
 
 def _option_values(argv: list[str], options: tuple[str, ...]) -> list[str]:
