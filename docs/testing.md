@@ -34,6 +34,7 @@ make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 | `tests/fakes.py` | In-process fake client and scripted connection — no sockets |
 | `tests/test_serverquery.py` | Reference encoder round-trips |
 | `tests/test_client.py` | `ServerQueryClient` against scripted bytes and the real captures |
+| `tests/test_structure.py` | Module size limit, thin entry points, exactly one logger |
 | `tests/test_output.py` | Scans every log call for a template built at runtime; `printable()` for printed lines |
 | `tests/test_logging.py` | `RedactingFilter`: password censoring, forged-line escaping, a hostile server |
 | `tests/test_cli.py` | Flags as strings, argparse error masking in the exporter and the test tools, `main()` never printing the password, a repository scan for unmasked parsers |
@@ -110,7 +111,7 @@ command-line tool gets a row in `tool_cases()`.**
 
 ## Adding a metric
 
-1. Add the field name to `METRICS_NAMES` in `app.py`.
+1. Add the field name to `METRICS_NAMES` in `teamspeak_prometheus/metrics.py`.
 2. Add the row to [metrics.md](metrics.md).
 3. `tests/test_metrics.py::test_every_documented_metric_gets_a_gauge` asserts the
    count — update it.

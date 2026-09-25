@@ -19,7 +19,7 @@ or re-labelled as a side effect of another change. See AGENTS.md, "The Metric
 Contract".
 
 Adding a metric that `serverinfo` already returns is a small allowed change —
-add the name to `METRICS_NAMES` in `app.py`, add it to this table, and add a
+add the name to `METRICS_NAMES` in `teamspeak_prometheus/metrics.py`, add it to this table, and add a
 test.
 
 ## The 41 metrics

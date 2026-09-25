@@ -62,6 +62,9 @@ It is the state as shipped: what a user gets if they pull this tag today.
   ServerQuery errors: it logs, counts the error, and retries with backoff
   (doubling, capped at 60 seconds or the poll interval if that is longer).
 - The poll interval is measured start to start.
+- The code is a package, `teamspeak_prometheus`, split by domain; `app.py`
+  and `healthcheck.py` remain the entry points, so nothing changes for
+  users.
 - Command-line errors never repeat a value: only the exporter's own flag names
   stay visible, so a mistyped `--ts3pasword <password>` is reported as
   `unrecognized arguments: … …`. Configuration errors are censored like every

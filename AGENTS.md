@@ -58,21 +58,44 @@ The ServerQuery password MUST NOT be logged, printed, included in an error messa
 
 The settings banner censors it today. Keep it censored.
 
-Command-line errors are printed by argparse, outside logging; `app.SafeArgumentParser` masks every value in them. Every command-line parser in this repository — exporter, test harness, fake server, any future script — MUST use it, with `secret_options` naming its password flags; `tests/test_cli.py` fails on a plain `argparse.ArgumentParser`.
+Command-line errors are printed by argparse, outside logging; `teamspeak_prometheus.cli.SafeArgumentParser` masks every value in them. Every command-line parser in this repository — exporter, test harness, fake server, any future script — MUST use it, with `secret_options` naming its password flags; `tests/test_cli.py` fails on a plain `argparse.ArgumentParser`.
 
-There is exactly one list of passwords — every one given, flag and environment, used or overridden, and every repeat of a password flag (argparse keeps only the last; password flags use `app.RememberEveryValue`, read back with `app.given_values`) — and every place that censors (log filter, metric labels, argparse errors, healthcheck output) gets that list. Never censor with just the configured password. Do not add argparse `type=` or `choices=` to the exporter's flags: they are validated by the option parsers in `_OPTIONS`, after environment precedence.
+There is exactly one list of passwords — every one given, flag and environment, used or overridden, and every repeat of a password flag (argparse keeps only the last; password flags use `cli.RememberEveryValue`, read back with `cli.given_values`) — and every place that censors (log filter, metric labels, argparse errors, healthcheck output) gets that list. Never censor with just the configured password. Do not add argparse `type=` or `choices=` to the exporter's flags: they are validated by the option parsers in `_OPTIONS`, after environment precedence.
 
-Text from the TeamSpeak server is untrusted. It reaches the log only as arguments of log calls, where the `RedactingFilter` installed by `main()` censors the password and escapes control characters. It reaches `/metrics` only as `virtualserver_name` label values, which the service passes through `redact()` first. Never format any value — server text or configuration — into a log template: templates are literals (or module-level string constants), values are arguments; `tests/test_output.py` scans every log call. Printed lines (healthcheck, test tools) go through `app.printable()`. Never pre-format server text into a log message, never add a server-supplied label without `redact()`, and never write server text anywhere else unfiltered.
+Text from the TeamSpeak server is untrusted. It reaches the log only as arguments of log calls, where the `RedactingFilter` installed by `main()` censors the password and escapes control characters. It reaches `/metrics` only as `virtualserver_name` label values, which the service passes through `redact()` first. Never format any value — server text or configuration — into a log template: templates are literals (or module-level string constants), values are arguments; `tests/test_output.py` scans every log call. Printed lines (healthcheck, test tools) go through `redaction.printable()`. Never pre-format server text into a log message, never add a server-supplied label without `redact()`, and never write server text anywhere else unfiltered.
 
 `--ts3password` exposes the password through the process list. The documentation MUST keep recommending `TEAMSPEAK_PASSWORD` instead. Do not remove the flag — it is existing public behavior.
 
-This rule is not scoped to `app.py`. Test support, fakes, harnesses and scripts MUST NOT print a password either, even a fixture one — an exception that is visible in the tree is an exception the next change will copy.
+This rule is not scoped to the exporter. Test support, fakes, harnesses and scripts MUST NOT print a password either, even a fixture one — an exception that is visible in the tree is an exception the next change will copy.
 
 Every command-line tool in this repository is listed in `tool_cases()` in `tests/test_smoke.py`, which runs it with passwords that collide with its output (a port number, a dash-prefixed value) and fails if any output contains them. A new tool gets a row there.
 
 Never commit a real host, password, or ServerQuery credential. Test fixtures use fake values.
 
 ## Architecture
+
+```text
+app.py                          entry point: python app.py -> main.main()
+healthcheck.py                  entry point: the container HEALTHCHECK
+teamspeak_prometheus/
+  __init__.py      __version__
+  main.py          main(), serve(), SIGTERM: startup, endpoint, poll loop
+  config.py        Config, defaults, one parser per option, resolve_config,
+                   overridden_flags, the settings banner
+  cli.py           SafeArgumentParser (masks and censors everything argparse
+                   prints), RememberEveryValue, parse_args, password_candidates
+  service.py       Teamspeak3MetricService (one session per poll), PollResult,
+                   next_delay, poll_forever
+  serverquery.py   ServerQueryClient: login, serverlist, serverinfo, flood
+                   retries, session budget; Ts3Client, default_client_factory
+  wire.py          ServerQuery framing and escaping, decode_record
+  metrics.py       METRICS_NAMES (the contract), gauges, self-metrics,
+                   update_gauges
+  redaction.py     redact, printable, escape_control_characters, RedactingFilter
+  logs.py          the one logger, configure_logging
+  errors.py        ExporterError, ServerQueryError, LoginFailed
+  healthcheck.py   find the exporter in /proc, resolve its port, probe
+```
 
 ```text
 main()
@@ -158,10 +181,11 @@ Stop and ask before:
 
 ```text
 Language:            Python 3.12+ (image runs 3.14)
-Runtime deps:        prometheus_client only; ServerQuery client is in app.py
+Runtime deps:        prometheus_client only; ServerQuery client is built in
 Linter/formatter:    ruff
 Tests:               pytest
-Entry point:         app.py (single module, intentionally)
+Code:                package teamspeak_prometheus, modules < 300 lines (400 hard)
+Entry points:        app.py (exporter), healthcheck.py (container), thin
 Healthcheck:         healthcheck.py, container-only, reuses app's config resolution
 Poll interval:       5s, --pollinterval / TEAMSPEAK_POLL_INTERVAL
 Container:           python:3.14-alpine, non-root

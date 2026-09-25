@@ -1,7 +1,46 @@
 # Architecture
 
-One module, `app.py`, plus a test suite. That is deliberate — the exporter is
-small enough that a package layout would cost more than it buys.
+The package `teamspeak_prometheus`, organized by domain, plus two thin entry
+points and a test suite. It started as one module; once robustness and secret
+handling grew it past 1,300 lines, it was split so each module has one job and
+stays under 300 lines (`tests/test_structure.py` fails above 400).
+
+## Modules
+
+```text
+app.py                          entry point: python app.py -> main.main()
+healthcheck.py                  entry point: the container HEALTHCHECK
+teamspeak_prometheus/
+  __init__.py      __version__
+  main.py          main(), serve(), SIGTERM: startup, endpoint, poll loop
+  config.py        Config, defaults, one parser per option, resolve_config,
+                   overridden_flags, the settings banner
+  cli.py           SafeArgumentParser (masks and censors everything argparse
+                   prints), RememberEveryValue, parse_args, password_candidates
+  service.py       Teamspeak3MetricService (one session per poll), PollResult,
+                   next_delay, poll_forever
+  serverquery.py   ServerQueryClient: login, serverlist, serverinfo, flood
+                   retries, session budget; Ts3Client, default_client_factory
+  wire.py          ServerQuery framing and escaping, decode_record
+  metrics.py       METRICS_NAMES (the contract), gauges, self-metrics,
+                   update_gauges
+  redaction.py     redact, printable, escape_control_characters, RedactingFilter
+  logs.py          the one logger, configure_logging
+  errors.py        ExporterError, ServerQueryError, LoginFailed
+  healthcheck.py   find the exporter in /proc, resolve its port, probe
+```
+
+Dependencies point one way: `errors`, `wire` and `redaction` depend on nothing
+in the package; `logs` on `redaction`; `config`, `serverquery` and `metrics` on
+those; `cli` on `config`; `service` on all of these; `main` on everything.
+`app.py` and `healthcheck.py` stay at the repository root as entry points, so
+`python app.py`, the container commands and the healthcheck's process
+detection are the same as before the split.
+
+**One logger.** Every module logs through `logs.log`. The `RedactingFilter` is
+attached to that logger, and a filter on a logger does not apply to its child
+loggers: a module calling `logging.getLogger(__name__)` would log past the
+censoring. `tests/test_structure.py` fails on any other `getLogger`.
 
 ## Flow
 
@@ -10,7 +49,7 @@ main(argv)
   parse_args(argv)                     argparse; unset flags stay None
   resolve_config(args, os.environ)     pure: -> Config (env wins over flags)
   overridden_flags(args, os.environ)   warn about flags an env var overrides
-  describe_settings(config)            banner, password censored
+  log_settings(config)                 banner: fixed template, values escaped
   build_gauges(REGISTRY)               41 gauges, one label: virtualserver_name
   build_exporter_metrics(REGISTRY)     teamspeak_exporter_* self-metrics
   start_http_server(metrics_port)      prometheus_client, own thread
@@ -39,7 +78,7 @@ Three properties make this testable, and all three are required by
 `policies/20-python-code-policy.md`:
 
 1. **No import-time work.** Everything runs behind `main()` and the `__main__`
-   guard, so tests can `import app` freely.
+   guard of the entry points, so tests import any module freely.
 2. **Injected I/O.** `Teamspeak3MetricService` takes a `client_factory` and a
    clock; `ServerQueryClient` takes a connection and a sleep function;
    `poll_forever` takes a clock and a sleep function. Unit tests never open a
@@ -187,7 +226,7 @@ probing `METRICS_PORT` (or 8000) alone would declare an exporter started with
 find_exporter(/proc)        every /proc/<pid>/cmdline, lowest PID first,
                             skipping itself; the arguments after app.py,
                             and the exporter's own /proc/<pid>/environ
-metrics_port(argv, env)     app.parse_args + app.resolve_config with the
+metrics_port(argv, env)     cli.parse_args + config.resolve_config with the
                             exporter's environment: its precedence rules
 probe(port)                 GET http://127.0.0.1:<port>/metrics, 4s timeout,
                             never through a proxy

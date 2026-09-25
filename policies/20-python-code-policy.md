@@ -41,7 +41,13 @@ if __name__ == '__main__':
     raise SystemExit(main())
 ```
 
-`app.py` MUST stay importable without side effects. The test suite imports it directly.
+Code lives in the package `teamspeak_prometheus`, one module per domain (see `docs/architecture.md`). `app.py` and `healthcheck.py` are entry points only: a docstring, one import of `main` from the package, and the `__main__` guard.
+
+Every module MUST stay importable without side effects. The test suite imports them directly.
+
+A module SHOULD stay under 300 lines and MUST NOT exceed 400; split it by responsibility before it does. `tests/test_structure.py` enforces the hard limit.
+
+All logging MUST go through `teamspeak_prometheus.logs.log`. No module may create its own logger: the redaction filter sits on that one logger and does not reach child loggers.
 
 ## 4. Typing
 
