@@ -60,7 +60,7 @@ Unit tests:
 | `test_structure.py` | Module size limit (package and tests), thin entry points, exactly one logger |
 | `test_release_tag.py` | `__version__`, CHANGELOG and the tag check agree |
 | `test_release_workflow.py` | `release.yml`: only a validated tag push publishes, least privilege, notes, Docker Hub page, manual runs |
-| `test_release_notes.py` | Release notes from one CHANGELOG section, no broken reference links in any form |
+| `test_release_notes.py` | Release notes from one CHANGELOG section, no broken reference links in any form, fenced code left alone |
 | `test_workflow_hygiene.py` | No persisted tokens, the default branch, Dependabot keeping version ranges |
 
 Smoke tests (subprocesses and sockets, `make test-smoke`):

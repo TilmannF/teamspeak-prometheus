@@ -158,6 +158,90 @@ def test_a_label_defined_both_inside_and_outside_is_fine():
     assert '[docs]: https://x/new' in release_notes(text, '1.1.0')
 
 
+# -- fenced code is text, not Markdown ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'fence',
+    [
+        ('```', '```'),
+        ('~~~', '~~~'),
+        ('```markdown', '```'),  # with an info string
+        ('````', '````'),
+        ('  ```', '  ```'),  # inside a list item
+        ('> ```', '> ```'),  # inside a block quote
+    ],
+    ids=['backticks', 'tildes', 'info-string', 'four', 'list-item', 'block-quote'],
+)
+def test_a_heading_inside_a_code_block_does_not_end_the_section(fence):
+    # Codex: the example cut the release notes short, silently
+    opening, closing = fence
+    body = f'- example:\n\n{opening}\n## [configuration]\n{closing}\n\n- after it'
+    text = changelog(f'## [1.1.0]\n\n{body}', '## [1.0.0]\n\n- first')
+
+    assert release_notes(text, '1.1.0') == body
+
+
+@pytest.mark.parametrize(
+    'inner',
+    ['```', '~~~~', '```` more'],
+    ids=['shorter', 'other-character', 'with-text'],
+)
+def test_only_a_matching_fence_closes_a_block(inner):
+    body = f'````\n{inner}\n## [configuration]\n````\n\n- after it'
+    text = changelog(f'## [1.1.0]\n\n{body}', '## [1.0.0]\n\n- first')
+
+    assert release_notes(text, '1.1.0') == body
+
+
+def test_a_backtick_line_with_a_backtick_after_it_is_no_fence():
+    # CommonMark: ``` a`b is inline code, so the next heading is a heading
+    text = changelog('## [1.1.0]\n\n``` a`b', '## [1.0.0]\n\n- first')
+
+    assert release_notes(text, '1.1.0') == '``` a`b'
+
+
+def test_a_definition_inside_a_code_block_is_an_example():
+    # Codex: the example satisfied the real reference, and published it broken
+    body = '- see [docs]\n\n```markdown\n[docs]: https://x/example\n```'
+    text = changelog(
+        f'## [1.1.0]\n\n{body}',
+        '## [1.0.0]\n\n- first',
+        links='[docs]: https://x/docs\n',
+    )
+
+    with pytest.raises(NotesError, match=re.escape('[docs]')):
+        release_notes(text, '1.1.0')
+
+
+def test_a_reference_inside_a_code_block_is_no_link():
+    body = '- example:\n\n```\nsee [docs] and [the guide][]\n```'
+    text = changelog(
+        f'## [1.1.0]\n\n{body}',
+        '## [1.0.0]\n\n- first',
+        links='[docs]: https://x/docs\n',
+    )
+
+    assert release_notes(text, '1.1.0') == body
+
+
+def test_a_code_block_never_closed_fails():
+    # It would swallow the rest of the notes, and every heading after it
+    text = changelog('## [1.1.0]\n\n```\n- no end', '## [1.0.0]\n\n- first')
+
+    with pytest.raises(NotesError, match='never closed'):
+        release_notes(text, '1.1.0')
+    with pytest.raises(NotesError, match=r"no '## \[1\.0\.0\]' section.*never closed"):
+        release_notes(text, '1.0.0')
+
+
+def test_a_heading_may_be_indented_up_to_three_spaces():
+    text = changelog('## [1.1.0]\n\n- newer', '   ## [1.0.0]\n\n- first')
+
+    assert release_notes(text, '1.1.0') == '- newer'
+    assert release_notes(text, '1.0.0') == '- first'
+
+
 # -- the command line the workflow calls --------------------------------------------
 
 

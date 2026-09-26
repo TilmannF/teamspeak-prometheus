@@ -53,7 +53,9 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
      its notes. `.github/scripts/changelog_section.py` extracts it and refuses
      a section that references a link defined elsewhere in the changelog — in
      any Markdown form, full, collapsed or shortcut — since those would render
-     as plain brackets; it runs before anything is published.
+     as plain brackets, and a code block left open, which would swallow the
+     rest. Fenced code is left alone: a heading, link or definition inside an
+     example is text. It runs before anything is published.
 
    Run `python3 .github/scripts/changelog_section.py vX.Y.Z` locally to
    preview the notes.

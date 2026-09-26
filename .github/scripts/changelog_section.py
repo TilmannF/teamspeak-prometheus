@@ -8,7 +8,8 @@ section is lifted out. This fails -- before anything is published -- on every
 label defined in the changelog but not in the section, in each reference form
 Markdown has: full ``[text][label]``, collapsed ``[label][]`` and shortcut
 ``[label]``. Labels defined nowhere are plain text in both places, and
-definitions inside the section travel with it.
+definitions inside the section travel with it. Fenced code blocks are text,
+not Markdown: a heading, definition or reference inside one is none of those.
 
 Standard library only; the release workflow runs it before any publishing
 step. Grew out of TilmannF/pa2_exporter's tools/changelog-section.sh.
@@ -20,12 +21,16 @@ import re
 import sys
 from pathlib import Path
 
-HEADING = re.compile(r'^## \[(?P<version>[^\]]+)\]')
+HEADING = re.compile(r'^ {0,3}##[ \t]+\[(?P<version>[^\]]+)\]')
 # The destination may follow the colon directly, or on the next line.
 DEFINITION = re.compile(r'^ {0,3}\[(?P<label>[^\]]+)\]:')
 # [text][label], [text][] or [text] -- not followed by "(" (an inline link)
 REFERENCE = re.compile(r'\[(?P<text>[^\[\]]+)\](?:\[(?P<label>[^\[\]]*)\])?(?![(\[])')
 CODE_SPAN = re.compile(r'`[^`]*`')
+# Opening or closing fence. Inside a list item or block quote a fence is
+# indented or prefixed; any such prefix is accepted -- an approximation that
+# errs toward reading a line as code.
+FENCE = re.compile(r'^[ \t>]*(?P<fence>`{3,}|~{3,})(?P<info>.*)$')
 
 
 class NotesError(Exception):
@@ -36,6 +41,43 @@ def normalize(label: str) -> str:
     """Markdown matches labels case-insensitively, with whitespace collapsed."""
 
     return ' '.join(label.split()).casefold()
+
+
+def fenced(lines: list[str]) -> tuple[list[bool], bool]:
+    """Which lines are fenced code (the fences too), and whether one is open.
+
+    As in CommonMark, a block closes with a fence of the same character, at
+    least as long, with nothing after it; one that never closes runs to the
+    end. A backtick fence's info string cannot contain a backtick.
+    """
+
+    marks: list[bool] = []
+    fence = ''
+    for line in lines:
+        match = FENCE.match(line)
+        if not fence:
+            if match and not (match['fence'][0] == '`' and '`' in match['info']):
+                fence = match['fence']
+            marks.append(bool(fence))
+            continue
+        marks.append(True)
+        if (
+            match
+            and match['fence'][0] == fence[0]
+            and len(match['fence']) >= len(fence)
+            and not match['info'].strip()
+        ):
+            fence = ''
+    return marks, bool(fence)
+
+
+def prose(text: str) -> list[str]:
+    """The lines of ``text`` outside fenced code blocks."""
+
+    lines = text.splitlines()
+    return [
+        line for line, code in zip(lines, fenced(lines)[0], strict=True) if not code
+    ]
 
 
 def section(changelog: str, version: str) -> str:
@@ -49,16 +91,26 @@ def section(changelog: str, version: str) -> str:
 
     version = version.removeprefix('v')
     lines = changelog.splitlines()
-    starts = [i for i, line in enumerate(lines) if HEADING.match(line)]
+    code, still_open = fenced(lines)
+    starts = [i for i, line in enumerate(lines) if not code[i] and HEADING.match(line)]
     for position, start in enumerate(starts):
         if HEADING.match(lines[start])['version'] != version:
             continue
         is_last = position + 1 == len(starts)
         end = len(lines) if is_last else starts[position + 1]
         body = lines[start + 1 : end]
+        if fenced(body)[1]:
+            # It would swallow the rest of the release notes
+            raise NotesError(f"a code block in '## [{version}]' is never closed")
         if is_last:
             body = without_the_link_block(body)
         return '\n'.join(body).strip('\n')
+    if still_open:
+        # The unclosed block hides every heading after it
+        raise NotesError(
+            f"no '## [{version}]' section in the changelog; a code block "
+            'before it is never closed'
+        )
     raise NotesError(f"no '## [{version}]' section in the changelog")
 
 
@@ -80,17 +132,15 @@ def without_the_link_block(body: list[str]) -> list[str]:
 
 def definitions(text: str) -> set[str]:
     return {
-        normalize(m['label'])
-        for line in text.splitlines()
-        if (m := DEFINITION.match(line))
+        normalize(m['label']) for line in prose(text) if (m := DEFINITION.match(line))
     }
 
 
 def references(text: str) -> list[str]:
-    """Every label referenced, in any of the three forms, outside code spans."""
+    """Every label referenced, in any of the three forms, outside code."""
 
     labels = []
-    for line in text.splitlines():
+    for line in prose(text):
         if DEFINITION.match(line):
             continue
         for match in REFERENCE.finditer(CODE_SPAN.sub('', line)):
