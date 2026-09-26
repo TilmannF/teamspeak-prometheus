@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -48,12 +49,35 @@ def help_output(argv: list[str], capsys, secrets: list[str] | None = None) -> st
 REPOSITORY = Path(__file__).parent.parent
 
 
-def python_files() -> list[Path]:
+def repository_files(pattern: str) -> list[Path]:
+    """Files of the repository -- its scripts in .github/ too, no virtualenv."""
+
     return [
         path
-        for path in REPOSITORY.rglob('*.py')
+        for path in REPOSITORY.rglob(pattern)
         if not any(
-            part.startswith('.') or part == '__pycache__'
+            (part.startswith('.') and part != '.github') or part == '__pycache__'
             for part in path.relative_to(REPOSITORY).parts
         )
     ]
+
+
+def python_files() -> list[Path]:
+    return repository_files('*.py')
+
+
+def has_main_guard(path: Path) -> bool:
+    return any(
+        isinstance(node, ast.If) and ast.unparse(node.test) == "__name__ == '__main__'"
+        for node in ast.parse(path.read_text(), str(path)).body
+    )
+
+
+def command_line_tools() -> list[str]:
+    """Every file that runs as a program: a __main__ guard or a shebang."""
+
+    tools = [path for path in python_files() if has_main_guard(path)]
+    tools += [
+        path for path in repository_files('*.sh') if path.read_text().startswith('#!')
+    ]
+    return sorted(path.relative_to(REPOSITORY).as_posix() for path in tools)

@@ -48,7 +48,7 @@ Unit tests:
 | `test_config.py` | Defaults, environment precedence, validation, override warnings |
 | `test_cli_errors.py` | Everything argparse prints — errors, usage, `--help` — masks values and censors passwords |
 | `test_cli_config.py` | Flags as strings, the password list, `main()` handing it to every censor |
-| `test_cli_scan.py` | A repository scan for unmasked parsers; the test tools checked like the exporter |
+| `test_cli_scan.py` | Repository scans: no unmasked parser, every tool that sees a password leak-tested; the test tools checked like the exporter |
 | `test_metrics.py` | The metric contract: names, prefix, label, values, self-metrics, label length |
 | `test_service.py` | One poll: sequence, error survival, what it censors, its clocks |
 | `test_service_virtualservers.py` | Stopped, removed, renamed and same-named virtualservers; missing fields |
@@ -134,7 +134,11 @@ tool — the exporter, the healthcheck, the harness, the fake server — with
 awkward passwords: equal to a port the tool prints, starting with `-`, after a
 mistyped flag, equal to a flag name, or equal to (or inside) the censoring
 marker `*censored*` itself. No output may contain the password. **A new
-command-line tool gets a row in `tool_cases()`.**
+command-line tool that takes or reads a password gets a row in
+`tool_cases()`.** `tests/test_cli_scan.py` finds every tool in the repository
+(`__main__` guard or shebang, `.github/scripts/` included) and fails on one
+that mentions a password or imports the package without a row. The release
+scripts never see a password, so they have none.
 
 ## Adding a metric
 

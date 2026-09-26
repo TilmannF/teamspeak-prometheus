@@ -68,7 +68,7 @@ Text from the TeamSpeak server is untrusted. It reaches the log only as argument
 
 This rule is not scoped to the exporter. Test support, fakes, harnesses and scripts MUST NOT print a password either, even a fixture one — an exception that is visible in the tree is an exception the next change will copy.
 
-Every command-line tool in this repository is listed in `tool_cases()` in `tests/test_smoke_leaks.py`, which runs it with passwords that collide with its output (a port number, a dash-prefixed value) and fails if any output contains them. A new tool gets a row there.
+Every command-line tool in this repository that takes or reads a ServerQuery password — directly, or through the `teamspeak_prometheus` package — is listed in `tool_cases()` in `tests/test_smoke_leaks.py`, which runs it with passwords that collide with its output (a port number, a dash-prefixed value) and fails if any output contains them. A new one gets a row there; `tests/test_cli_scan.py` finds every tool (`__main__` guard or shebang, `.github/` included) and fails on one that sees a password without a row. Tools that never see one, like the release scripts in `.github/scripts/`, have nothing to leak and stay out — keep it that way rather than hand them a password.
 
 Never commit a real host, password, or ServerQuery credential. Test fixtures use fake values.
 

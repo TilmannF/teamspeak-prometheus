@@ -21,7 +21,8 @@ import sys
 from pathlib import Path
 
 HEADING = re.compile(r'^## \[(?P<version>[^\]]+)\]')
-DEFINITION = re.compile(r'^ {0,3}\[(?P<label>[^\]]+)\]:\s')
+# The destination may follow the colon directly, or on the next line.
+DEFINITION = re.compile(r'^ {0,3}\[(?P<label>[^\]]+)\]:')
 # [text][label], [text][] or [text] -- not followed by "(" (an inline link)
 REFERENCE = re.compile(r'\[(?P<text>[^\[\]]+)\](?:\[(?P<label>[^\[\]]*)\])?(?![(\[])')
 CODE_SPAN = re.compile(r'`[^`]*`')
@@ -41,8 +42,9 @@ def section(changelog: str, version: str) -> str:
     """The body of ``## [version]``, up to the next version heading.
 
     Link definitions right before the next heading belong to the section. In
-    the last section, a trailing block of definitions is the changelog's own
-    (Keep a Changelog puts them at the end of the file) and is left out.
+    the last section, the trailing block of definitions is mostly the
+    changelog's own (Keep a Changelog puts them at the end of the file): only
+    the definitions the section uses stay.
     """
 
     version = version.removeprefix('v')
@@ -55,10 +57,25 @@ def section(changelog: str, version: str) -> str:
         end = len(lines) if is_last else starts[position + 1]
         body = lines[start + 1 : end]
         if is_last:
-            while body and (not body[-1].strip() or DEFINITION.match(body[-1])):
-                body.pop()
+            body = without_the_link_block(body)
         return '\n'.join(body).strip('\n')
     raise NotesError(f"no '## [{version}]' section in the changelog")
+
+
+def without_the_link_block(body: list[str]) -> list[str]:
+    """Drop the trailing definitions, except those the rest of ``body`` uses."""
+
+    cut = len(body)
+    while cut and (not body[cut - 1].strip() or DEFINITION.match(body[cut - 1])):
+        cut -= 1
+    text = body[:cut]
+    used = {normalize(label) for label in references('\n'.join(text))}
+    kept = [
+        line
+        for line in body[cut:]
+        if (match := DEFINITION.match(line)) and normalize(match['label']) in used
+    ]
+    return text + [''] + kept if kept else text
 
 
 def definitions(text: str) -> set[str]:

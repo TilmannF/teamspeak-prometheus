@@ -103,6 +103,35 @@ def test_definitions_at_the_end_of_the_section_travel_with_it():
 
 
 @pytest.mark.parametrize(
+    'definition',
+    ['[docs]:https://x/docs', '[docs]:\n  https://x/docs'],
+    ids=['no-space', 'next-line'],
+)
+def test_every_definition_form_counts(definition):
+    # Codex: both are definitions in CommonMark, and were not seen as such
+    text = changelog(
+        '## [1.1.0]\n\n- see [docs]', '## [1.0.0]\n\n- first', links=definition + '\n'
+    )
+
+    with pytest.raises(NotesError, match=re.escape('[docs]')):
+        release_notes(text, '1.1.0')
+
+
+def test_the_last_section_keeps_the_definitions_it_uses():
+    # Codex: the whole trailing block used to go, the section's own links too
+    text = changelog(
+        '## [1.0.0]\n\n- see [docs] and [the guide]\n\n[docs]: https://x/docs',
+        links='[the guide]: https://x/g\n[1.0.0]: https://x/v1.0.0\n',
+    )
+
+    notes = release_notes(text, '1.0.0')
+
+    assert notes == (
+        '- see [docs] and [the guide]\n\n[docs]: https://x/docs\n[the guide]: https://x/g'
+    )
+
+
+@pytest.mark.parametrize(
     'body',
     [
         '- see [the docs](https://x/docs)',  # inline link

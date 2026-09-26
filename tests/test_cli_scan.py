@@ -5,11 +5,12 @@ parsers, and the test tools checked like the exporter.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
 
-from tests.cli_support import REPOSITORY, SECRET, python_files
+from tests.cli_support import REPOSITORY, SECRET, command_line_tools, python_files
 
 
 def plain_parsers(path: Path) -> list[int]:
@@ -39,6 +40,7 @@ def test_the_scan_sees_the_whole_repository():
 
     assert len(package) >= 10
     assert package | {'app.py', 'healthcheck.py', 'tests/exporter_harness.py'} <= names
+    assert '.github/scripts/changelog_section.py' in names
     assert not any(name.startswith('.venv/') for name in names)
 
 
@@ -50,6 +52,54 @@ def test_no_command_line_parser_bypasses_value_masking():
     }
 
     assert offenders == {}, 'use SafeArgumentParser, see AGENTS.md "Secrets"'
+
+
+# Any spelling -- a flag, an environment variable, a variable name -- or the
+# package, which reads TEAMSPEAK_PASSWORD for app.py and healthcheck.py.
+SEES_A_PASSWORD = re.compile(r'password|^from teamspeak_prometheus', re.I | re.M)
+# Tools that see a password without a row in tool_cases(), and why.
+LEAK_TESTED_ELSEWHERE = {
+    'tests/container_test.sh': 'the image leak test: checks every log for its password',
+}
+
+
+def leak_tested_tools() -> set[str]:
+    from tests.test_smoke_leaks import tool_cases
+
+    return {
+        argv[1].replace('.', '/') + '.py' if argv[0] == '-m' else argv[0]
+        for _, argv, _, _ in tool_cases()
+    }
+
+
+def test_the_tool_scan_finds_every_kind_of_tool():
+    tools = set(command_line_tools())
+
+    assert {
+        'app.py',
+        'healthcheck.py',
+        'tests/fake_ts3_server.py',
+        'tests/exporter_harness.py',
+        'tests/container_test.sh',
+        '.github/scripts/changelog_section.py',
+        '.github/scripts/validate-release-tag.sh',
+    } <= tools
+    assert 'tests/test_structure.py' not in tools  # mentions the guard, has none
+
+
+def test_every_tool_that_sees_a_password_is_leak_tested():
+    # AGENTS.md, "Secrets": a tool that takes or reads a ServerQuery password
+    # gets a row in tool_cases(). A tool that never sees one -- the release
+    # scripts -- has nothing to leak and stays out.
+    sees_a_password = {
+        tool
+        for tool in command_line_tools()
+        if SEES_A_PASSWORD.search((REPOSITORY / tool).read_text())
+    }
+
+    assert sees_a_password >= {'app.py', 'healthcheck.py', 'tests/fake_ts3_server.py'}
+    untested = sees_a_password - leak_tested_tools() - set(LEAK_TESTED_ELSEWHERE)
+    assert untested == set(), 'add a row to tool_cases() in tests/test_smoke_leaks.py'
 
 
 @pytest.mark.parametrize(

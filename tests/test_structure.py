@@ -19,7 +19,7 @@ MAX_MODULE_LINES = 400
 
 
 def modules() -> list[Path]:
-    return sorted(PACKAGE.glob('*.py'))
+    return sorted(PACKAGE.rglob('*.py'))
 
 
 def test_the_package_is_found():
@@ -29,7 +29,8 @@ def test_the_package_is_found():
 
 
 def suite_modules():
-    return sorted((REPOSITORY / 'tests').glob('*.py'))
+    # Recursive: a module in a subpackage is no smaller for being nested.
+    return sorted((REPOSITORY / 'tests').rglob('*.py'))
 
 
 @pytest.mark.parametrize(
