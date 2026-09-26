@@ -183,6 +183,8 @@ Stop and ask before:
 ```text
 Language:            Python 3.12+ (image runs 3.14)
 Runtime deps:        prometheus_client only; ServerQuery client is built in
+Release tooling:     markdown-it-py (release notes only), exact pins with
+                     hashes in requirements-release.txt; never a runtime dep
 Linter/formatter:    ruff
 Tests:               pytest
 Code:                package teamspeak_prometheus, modules < 300 lines (400 hard);

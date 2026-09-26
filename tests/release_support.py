@@ -1,7 +1,9 @@
-"""Shared helpers of the release tests: the workflow file, parsed."""
+"""Shared helpers of the release tests: the workflow file, parsed, and the
+release-notes script, imported."""
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
@@ -70,3 +72,14 @@ def all_checkouts() -> list[tuple[str, str, dict]]:
                 if uses('actions/checkout')(step):
                     found.append((path.name, name, step))
     return found
+
+
+NOTES_SCRIPT = ROOT / '.github' / 'scripts' / 'changelog_section.py'
+
+_spec = importlib.util.spec_from_file_location('changelog_section', NOTES_SCRIPT)
+notes_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(notes_module)
+
+
+def changelog(*sections: str, links: str = '') -> str:
+    return '# Changelog\n\nIntro.\n\n' + '\n\n'.join(sections) + '\n\n' + links

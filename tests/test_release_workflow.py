@@ -4,9 +4,12 @@ least privilege; notes, Docker Hub page and manual runs.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from tests.release_support import (
+    ROOT,
     TAG_PUSH,
     WRITE_PERMISSIONS,
     gated_on_tag_push,
@@ -139,6 +142,7 @@ def test_release_notes_come_from_the_changelog_before_anything_is_published():
     )
 
     assert 'changelog_section.py "$TAG"' in steps()[notes]['run']
+    assert '> "$RUNNER_TEMP/release-notes.md"' in steps()[notes]['run']
     assert notes < min(publishing)
     (release,) = index_of(uses('softprops/action-gh-release'))
     assert steps()[release]['with'] == {
@@ -168,3 +172,77 @@ def test_a_manual_run_previews_the_release_notes():
     runs = [step.get('run', '') for step in jobs()['build']['steps']]
 
     assert any('changelog_section.py' in run for run in runs)
+
+
+# -- the release-notes parser: exact, hashed, isolated ------------------------------
+
+NOTES_PYTHON = '"$RUNNER_TEMP/notes/bin/python" .github/scripts/changelog_section.py'
+REQUIRED_FLAGS = ['--require-hashes', '--no-deps', '--only-binary=:all:']
+
+
+@pytest.mark.parametrize('job', ['build', 'release'])
+def test_the_notes_run_on_the_parser_installed_from_hashes_just_before(job):
+    job_steps = jobs()[job]['steps']
+    runs = [str(step.get('run', '')) for step in job_steps]
+    (notes,) = [i for i, run in enumerate(runs) if 'changelog_section.py' in run]
+    (install,) = [i for i, run in enumerate(runs) if 'pip' in run]
+    command = ' '.join(runs[install].replace('\\\n', ' ').split())
+
+    assert NOTES_PYTHON in runs[notes]
+    assert install == notes - 1
+    assert 'python3 -m venv "$RUNNER_TEMP/notes"' in command
+    assert all(flag in command.split() for flag in REQUIRED_FLAGS)
+    assert command.endswith('-r requirements-release.txt')
+
+
+def test_no_workflow_installs_anything_else_with_pip():
+    installs = [
+        (path.name, line.strip())
+        for path in (ROOT / '.github' / 'workflows').glob('*.yml')
+        for line in path.read_text().replace('\\\n', ' ').splitlines()
+        if 'pip' in line and 'install' in line
+    ]
+
+    assert {name for name, _ in installs} == {'release.yml'}
+    assert all('--require-hashes' in line for _, line in installs)
+
+
+def release_requirements() -> dict[str, list[str]]:
+    """Name to hashes, for every requirement in requirements-release.txt."""
+
+    text = (ROOT / 'requirements-release.txt').read_text().replace('\\\n', ' ')
+    found = {}
+    for line in text.splitlines():
+        if not (line := line.split('#')[0].strip()):
+            continue
+        spec, *options = line.split()
+        name, _, version = spec.partition('==')
+        assert version, f'{spec}: pin an exact version'
+        found[name] = [o.removeprefix('--hash=sha256:') for o in options]
+    return found
+
+
+def test_every_release_requirement_is_pinned_with_hashes():
+    requirements = release_requirements()
+
+    assert set(requirements) == {'markdown-it-py', 'mdurl'}
+    for hashes in requirements.values():
+        assert hashes
+        assert all(len(h) == 64 and int(h, 16) >= 0 for h in hashes)
+
+
+def test_the_pins_cover_what_the_parser_needs():
+    # --no-deps installs nothing unlisted: a dependency the parser gains in
+    # an update must be pinned too, or the release fails at import.
+    from importlib.metadata import requires
+
+    def needs(package: str) -> set[str]:
+        return {
+            re.split(r'[ ;<>=~!\[]', requirement)[0].lower()
+            for requirement in requires(package) or []
+            if 'extra ==' not in requirement
+        }
+
+    pinned = set(release_requirements())
+
+    assert needs('markdown-it-py') | needs('mdurl') <= pinned

@@ -51,14 +51,23 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
      absolute;
    - creates the GitHub Release with the version's `CHANGELOG.md` section as
      its notes. `.github/scripts/changelog_section.py` extracts it and refuses
-     a section that references a link defined elsewhere in the changelog — in
-     any Markdown form, full, collapsed or shortcut — since those would render
-     as plain brackets, and a code block left open, which would swallow the
-     rest. Fenced code is left alone: a heading, link or definition inside an
-     example is text. It runs before anything is published.
+     a section with a link that needs a definition from elsewhere in the
+     changelog — it would render as plain brackets — or a code block left
+     open, which would swallow the rest. It parses the Markdown with
+     `markdown-it-py`, a CommonMark parser, rather than guessing with
+     patterns: the section is parsed alone and with the changelog's other
+     definitions, and a link only the second parse has is a broken one. It
+     runs before anything is published.
 
-   Run `python3 .github/scripts/changelog_section.py vX.Y.Z` locally to
-   preview the notes.
+     The parser is release tooling only, never a runtime dependency. The
+     workflow installs it into its own environment from
+     `requirements-release.txt`: exact versions, wheels only, every file
+     checked against its hash, nothing resolved beyond the list. Dependabot
+     updates the pins and hashes; `tests/test_release_workflow.py` fails if a
+     pin loses its hash or the parser gains a dependency the list lacks.
+
+   Run `.venv/bin/python .github/scripts/changelog_section.py vX.Y.Z` locally
+   (after `make setup`, which installs the parser) to preview the notes.
 
    The Docker Hub token is a personal access token (Read & Write) created at
    hub.docker.com → Account settings → Personal access tokens.

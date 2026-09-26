@@ -2,3 +2,7 @@ pytest>=8.0
 requests>=2.31
 ruff>=0.6
 PyYAML>=6.0
+# The release-notes parser, for the tests of .github/scripts/changelog_section.py.
+# The release workflow installs the exact, hashed pins in requirements-release.txt;
+# the floor is verified: the notes tests pass against 4.0.0.
+markdown-it-py>=4.0

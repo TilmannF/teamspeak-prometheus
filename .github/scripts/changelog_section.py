@@ -5,108 +5,107 @@
 A release body is a standalone document: a reference-style link whose
 definition lives elsewhere in the changelog renders as literal text once the
 section is lifted out. This fails -- before anything is published -- on every
-label defined in the changelog but not in the section, in each reference form
-Markdown has: full ``[text][label]``, collapsed ``[label][]`` and shortcut
-``[label]``. Labels defined nowhere are plain text in both places, and
-definitions inside the section travel with it. Fenced code blocks are text,
-not Markdown: a heading, definition or reference inside one is none of those.
+such link. It does not guess at Markdown: the section is parsed twice by a
+CommonMark parser, alone and with the rest of the changelog's definitions,
+and a link that only exists in the second parse is a broken one. Headings,
+code, lists and escapes are the parser's business, not a regular expression's.
 
-Standard library only; the release workflow runs it before any publishing
-step. Grew out of TilmannF/pa2_exporter's tools/changelog-section.sh.
+Needs markdown-it-py (requirements-release.txt, installed with hashes by the
+release workflow; requirements-dev.txt for the tests). Release tooling only.
+Grew out of TilmannF/pa2_exporter's tools/changelog-section.sh.
 """
 
 from __future__ import annotations
 
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
-HEADING = re.compile(r'^ {0,3}##[ \t]+\[(?P<version>[^\]]+)\]')
-# The destination may follow the colon directly, or on the next line.
-DEFINITION = re.compile(r'^ {0,3}\[(?P<label>[^\]]+)\]:')
-# [text][label], [text][] or [text] -- not followed by "(" (an inline link)
-REFERENCE = re.compile(r'\[(?P<text>[^\[\]]+)\](?:\[(?P<label>[^\[\]]*)\])?(?![(\[])')
-CODE_SPAN = re.compile(r'`[^`]*`')
-# Opening or closing fence. Inside a list item or block quote a fence is
-# indented or prefixed; any such prefix is accepted -- an approximation that
-# errs toward reading a line as code.
-FENCE = re.compile(r'^[ \t>]*(?P<fence>`{3,}|~{3,})(?P<info>.*)$')
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+
+# CommonMark plus the GitHub extensions that change block structure. How a
+# reference resolves is the same in both.
+MARKDOWN = MarkdownIt('commonmark').enable(['table', 'strikethrough'])
+# The start of a version heading's text: "[1.0.0] - 2026-09-26"
+VERSION = re.compile(r'\[(?P<version>[^\]]+)\]')
+# The label as written, from the first line of a definition
+RAW_LABEL = re.compile(r'^[ \t>]*\[(?P<label>(?:\\.|[^\]\\])+)\]:')
+
+References = dict[str, dict]
 
 
 class NotesError(Exception):
     """The section is missing or would not render as a standalone document."""
 
 
-def normalize(label: str) -> str:
-    """Markdown matches labels case-insensitively, with whitespace collapsed."""
+def parse(
+    text: str, references: References | None = None
+) -> tuple[list[Token], References]:
+    """Block tokens and the link definitions in effect.
 
-    return ' '.join(label.split()).casefold()
-
-
-def fenced(lines: list[str]) -> tuple[list[bool], bool]:
-    """Which lines are fenced code (the fences too), and whether one is open.
-
-    As in CommonMark, a block closes with a fence of the same character, at
-    least as long, with nothing after it; one that never closes runs to the
-    end. A backtick fence's info string cannot contain a backtick.
+    ``references`` are definitions from elsewhere; the text's own are added
+    to them.
     """
 
-    marks: list[bool] = []
-    fence = ''
-    for line in lines:
-        match = FENCE.match(line)
-        if not fence:
-            if match and not (match['fence'][0] == '`' and '`' in match['info']):
-                fence = match['fence']
-            marks.append(bool(fence))
+    env = {'references': dict(references or {})}
+    tokens = MARKDOWN.parse(text, env)
+    return tokens, env['references']
+
+
+def unclosed_fences(tokens: list[Token], lines: list[str]) -> list[int]:
+    """Opening lines of fenced code blocks that never close.
+
+    The parser ends such a block with its container -- at the end of a list
+    item, or of the document -- and says nothing. It swallows the rest.
+    """
+
+    unclosed = []
+    for token in tokens:
+        if token.type != 'fence':
             continue
-        marks.append(True)
-        if (
-            match
-            and match['fence'][0] == fence[0]
-            and len(match['fence']) >= len(fence)
-            and not match['info'].strip()
-        ):
-            fence = ''
-    return marks, bool(fence)
-
-
-def prose(text: str) -> list[str]:
-    """The lines of ``text`` outside fenced code blocks."""
-
-    lines = text.splitlines()
-    return [
-        line for line, code in zip(lines, fenced(lines)[0], strict=True) if not code
-    ]
+        start, end = token.map
+        char, length = token.markup[0], len(token.markup)
+        closing = re.compile(f'{re.escape(char)}{{{length},}}[ \\t]*')
+        last = lines[end - 1].lstrip(' \t>')
+        if end - start < 2 or not closing.fullmatch(last):
+            unclosed.append(start)
+    return unclosed
 
 
 def section(changelog: str, version: str) -> str:
     """The body of ``## [version]``, up to the next version heading.
 
-    Link definitions right before the next heading belong to the section. In
-    the last section, the trailing block of definitions is mostly the
-    changelog's own (Keep a Changelog puts them at the end of the file): only
-    the definitions the section uses stay.
+    Only real top-level headings count: one inside code, a list or a block
+    quote is text. Definitions right before the next heading belong to the
+    section; in the last section, the trailing ones are mostly the
+    changelog's own link block, and only those the section uses stay.
     """
 
     version = version.removeprefix('v')
     lines = changelog.splitlines()
-    code, still_open = fenced(lines)
-    starts = [i for i, line in enumerate(lines) if not code[i] and HEADING.match(line)]
-    for position, start in enumerate(starts):
-        if HEADING.match(lines[start])['version'] != version:
+    tokens, _ = parse(changelog)
+    headings = [
+        (match['version'], token.map)
+        for token, inline in zip(tokens, tokens[1:], strict=False)
+        if token.type == 'heading_open'
+        and token.tag == 'h2'
+        and token.level == 0
+        and (match := VERSION.match(inline.content))
+    ]
+    for position, (found, (_, start)) in enumerate(headings):
+        if found != version:
             continue
-        is_last = position + 1 == len(starts)
-        end = len(lines) if is_last else starts[position + 1]
-        body = lines[start + 1 : end]
-        if fenced(body)[1]:
-            # It would swallow the rest of the release notes
+        is_last = position + 1 == len(headings)
+        end = len(lines) if is_last else headings[position + 1][1][0]
+        body = lines[start:end]
+        if unclosed_fences(parse('\n'.join(body))[0], body):
             raise NotesError(f"a code block in '## [{version}]' is never closed")
         if is_last:
             body = without_the_link_block(body)
         return '\n'.join(body).strip('\n')
-    if still_open:
-        # The unclosed block hides every heading after it
+    if unclosed_fences(tokens, lines):
         raise NotesError(
             f"no '## [{version}]' section in the changelog; a code block "
             'before it is never closed'
@@ -115,56 +114,84 @@ def section(changelog: str, version: str) -> str:
 
 
 def without_the_link_block(body: list[str]) -> list[str]:
-    """Drop the trailing definitions, except those the rest of ``body`` uses."""
+    """Drop the trailing definitions, except those the rest of ``body`` uses.
 
-    cut = len(body)
-    while cut and (not body[cut - 1].strip() or DEFINITION.match(body[cut - 1])):
-        cut -= 1
-    text = body[:cut]
-    used = {normalize(label) for label in references('\n'.join(text))}
-    kept = [
-        line
-        for line in body[cut:]
-        if (match := DEFINITION.match(line)) and normalize(match['label']) in used
-    ]
+    Used means: taking it out changes a link.
+    """
+
+    tokens, _ = parse('\n'.join(body))
+    cut = max((token.map[1] for token in tokens if token.map), default=0)
+    text, block = body[:cut], body[cut:]
+    while text and not text[-1].strip():
+        text.pop()
+    _, references = parse('\n'.join(block))
+    spans = sorted(tuple(reference['map']) for reference in references.values())
+
+    def links_without(dropped: tuple[int, int] | None) -> Counter:
+        kept = [
+            line
+            for number, line in enumerate(block)
+            if not (dropped and dropped[0] <= number < dropped[1])
+        ]
+        return links(parse('\n'.join([*text, '', *kept]))[0])
+
+    everything = links_without(None)
+    used = [span for span in spans if links_without(span) != everything]
+    kept = [line for start, end in used for line in block[start:end]]
     return text + [''] + kept if kept else text
 
 
-def definitions(text: str) -> set[str]:
-    return {
-        normalize(m['label']) for line in prose(text) if (m := DEFINITION.match(line))
-    }
+def links(tokens: list[Token]) -> Counter:
+    """Every link and image: kind, text, target."""
+
+    found: Counter = Counter()
+    for token in tokens:
+        text, href = None, ''
+        for child in token.children or []:
+            if child.type == 'link_open':
+                text, href = [], child.attrGet('href')
+            elif child.type == 'link_close':
+                found['link', ''.join(text), href] += 1
+                text = None
+            elif child.type == 'image':
+                found['image', child.content, child.attrGet('src')] += 1
+            elif text is not None:
+                text.append(child.content)
+    return found
 
 
-def references(text: str) -> list[str]:
-    """Every label referenced, in any of the three forms, outside code."""
+def broken_links(notes: str, changelog: str) -> list[str]:
+    """The links in ``notes`` that need a definition from outside them."""
 
-    labels = []
-    for line in prose(text):
-        if DEFINITION.match(line):
-            continue
-        for match in REFERENCE.finditer(CODE_SPAN.sub('', line)):
-            label = match['label']
-            labels.append(label if label else match['text'])  # collapsed, shortcut
-    return labels
-
-
-def broken_references(notes: str, changelog: str) -> list[str]:
-    outside = definitions(changelog) - definitions(notes)
-    return sorted({label for label in references(notes) if normalize(label) in outside})
+    changelog_lines = changelog.splitlines()
+    _, everywhere = parse(changelog)
+    alone, own = parse(notes)
+    outside = {label: ref for label, ref in everywhere.items() if label not in own}
+    in_context, _ = parse(notes, outside)
+    broken = links(in_context) - links(alone)
+    messages = []
+    for kind, text, href in sorted(broken):
+        for label, reference in sorted(outside.items()):
+            if reference['href'] != href:
+                continue
+            line = reference['map'][0]
+            raw = RAW_LABEL.match(changelog_lines[line])
+            written = raw['label'] if raw else label
+            shown = f'![{text}]' if kind == 'image' else f'[{text}]'
+            messages.append(f'{shown} uses [{written}], defined on line {line + 1}')
+    return messages
 
 
 def release_notes(changelog: str, version: str) -> str:
     notes = section(changelog, version)
     if not notes.strip():
         raise NotesError(f"the '## [{version.removeprefix('v')}]' section is empty")
-    broken = broken_references(notes, changelog)
+    broken = broken_links(notes, changelog)
     if broken:
         raise NotesError(
-            'the section references '
-            + ', '.join(f'[{label}]' for label in broken)
-            + ', defined outside it; use an inline link, or move the '
-            'definition into the section'
+            'the section links to definitions outside it: '
+            + '; '.join(broken)
+            + '. Use an inline link, or move the definition into the section'
         )
     return notes
 
