@@ -6,7 +6,7 @@ name: Release
 # builds: it proves the multi-arch build but never logs in, pushes, attests, or
 # creates a release -- and never holds a write token. To retry a failed
 # release, re-run the original tag-push run -- that is validated again.
-# tests/test_release.py enforces all of this.
+# tests/test_release_workflow.py enforces all of this.
 
 on:
   push:

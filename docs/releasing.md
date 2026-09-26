@@ -70,6 +70,7 @@ passed the check in step 3; only that job has write permissions.
 
 To retry a release that failed after the tag was pushed, re-run the original
 tag-push run ("Re-run jobs"). That run is a tag push again, so the tag is
-validated again. `tests/test_release.py` fails if any publishing step could
-run without a validated tag push, if any job other than `release` could write,
-or if any workflow's checkout leaves the Git token in `.git/config`.
+validated again. `tests/test_release_workflow.py` and
+`tests/test_workflow_hygiene.py` fail if any publishing step could run without
+a validated tag push, if any job other than `release` could write, or if any
+workflow's checkout leaves the Git token in `.git/config`.

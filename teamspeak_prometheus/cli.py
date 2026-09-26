@@ -26,7 +26,7 @@ class SafeArgumentParser(argparse.ArgumentParser):
     """An ``ArgumentParser`` whose error messages never repeat a value.
 
     Every command-line parser in this repository uses it -- the exporter, the
-    test harness, the fake server -- and tests/test_cli.py fails on any other.
+    test harness, the fake server -- and tests/test_cli_scan.py fails on any other.
 
     argparse quotes command-line fragments in its errors -- ``unrecognized
     arguments: --ts3pasword <password>`` after a typo, ``ambiguous option:

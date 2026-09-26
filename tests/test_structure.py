@@ -28,11 +28,25 @@ def test_the_package_is_found():
     assert {'__init__', 'main', 'service', 'serverquery', 'redaction', 'logs'} <= names
 
 
-@pytest.mark.parametrize('module', modules(), ids=lambda path: path.name)
+def suite_modules():
+    return sorted((REPOSITORY / 'tests').glob('*.py'))
+
+
+@pytest.mark.parametrize(
+    'module',
+    modules() + suite_modules(),
+    ids=lambda path: path.relative_to(REPOSITORY).as_posix(),
+)
 def test_no_module_outgrows_the_limit(module):
+    # Tests included: a 967-line test module is no easier to maintain than a
+    # 967-line application module.
     lines = len(module.read_text().splitlines())
 
     assert lines <= MAX_MODULE_LINES, f'{module.name} has {lines} lines: split it'
+
+
+def test_the_size_check_covers_the_tests_too():
+    assert len(suite_modules()) >= 20
 
 
 @pytest.mark.parametrize('entry_point', ENTRY_POINTS, ids=lambda path: path.name)
