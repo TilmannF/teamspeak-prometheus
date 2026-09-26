@@ -150,6 +150,77 @@ def test_code_that_leaves_its_container_fails_loudly(body):
         release_notes(text, '1.1.0')
 
 
+@pytest.mark.parametrize(
+    'block',
+    [
+        '```\ncode\n    ```',  # Codex: indented four spaces, it is code
+        '````\ncode\n```',  # shorter
+        '```\ncode\n~~~',  # the other character
+        '```\ncode\n``` more',  # text after it
+        '```',  # nothing after the opening
+    ],
+    ids=['indented-four', 'shorter', 'other-character', 'with-text', 'opening-only'],
+)
+def test_a_line_that_does_not_close_a_block_fails_it(block):
+    text = changelog(f'## [1.1.0]\n\n{block}', '## [1.0.0]\n\n- first')
+
+    with pytest.raises(NotesError, match='never closed'):
+        release_notes(text, '1.1.0')
+
+
+@pytest.mark.parametrize(
+    'block',
+    [
+        '```\ncode\n   ```',  # indented three spaces
+        '```\ncode\n```   ',  # trailing spaces
+        '```\n```',  # empty
+        '~~~\ncode\n~~~~~',  # longer
+        '- ```\n  code\n  ```',
+        '> ```\n> code\n> ```',
+    ],
+    ids=['indented-three', 'trailing-spaces', 'empty', 'longer', 'list', 'quote'],
+)
+def test_a_block_closed_by_the_rules_passes(block):
+    text = changelog(f'## [1.1.0]\n\n{block}', '## [1.0.0]\n\n- first')
+
+    assert release_notes(text, '1.1.0') == block
+
+
+def test_a_block_that_looks_closed_cannot_swallow_the_next_release():
+    # Codex: the four-space "fence" passed, and the unclosed block took every
+    # section after it into these notes
+    text = changelog('## [1.1.0]\n\n```\ncode\n    ```', '## [1.0.0]\n\n- first')
+
+    with pytest.raises(NotesError, match='never closed'):
+        release_notes(text, '1.1.0')
+    with pytest.raises(NotesError, match='before it is never closed'):
+        release_notes(text, '1.0.0')
+
+
+@pytest.mark.parametrize(
+    ('text', 'version'),
+    [
+        # the last section, with nothing after the fake fence
+        ('# Changelog\n\n## [1.0.0]\n\n- first\n\n```\ncode\n    ```', '1.0.0'),
+        # a list item's block, ended with the item by the next heading
+        (
+            changelog(
+                '## [1.1.0]\n\n- ```\n  code\n      ```', '## [1.0.0]\n\n- first'
+            ),
+            '1.1.0',
+        ),
+        ('# Changelog\n\n## [1.0.0]\n\n> ```\n> code\n>     ```', '1.0.0'),
+        ('# Changelog\n\n## [1.0.0]\n\n- ```\n  code', '1.0.0'),
+    ],
+    ids=['last-line', 'list-item', 'block-quote', 'no-closing-line'],
+)
+def test_a_block_ending_on_a_line_that_only_looks_like_a_fence_fails(text, version):
+    # Codex: where the block ends -- the text or its container -- on a
+    # four-space "fence", stripping the indentation made it a closing one
+    with pytest.raises(NotesError, match='never closed'):
+        release_notes(text, version)
+
+
 # -- what a parser knows and a pattern does not -------------------------------------
 
 

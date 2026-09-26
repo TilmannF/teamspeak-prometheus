@@ -50,28 +50,28 @@ def parse(
     """
 
     env = {'references': dict(references or {})}
-    tokens = MARKDOWN.parse(text, env)
+    # Ending in a newline, every line of a code block's content does too:
+    # unclosed_fences counts on it
+    tokens = MARKDOWN.parse(text if text.endswith('\n') else text + '\n', env)
     return tokens, env['references']
 
 
-def unclosed_fences(tokens: list[Token], lines: list[str]) -> list[int]:
+def unclosed_fences(tokens: list[Token]) -> list[int]:
     """Opening lines of fenced code blocks that never close.
 
     The parser ends such a block with its container -- at the end of a list
-    item, or of the document -- and says nothing. It swallows the rest.
+    item, or of the document -- and says nothing: it swallows the rest. But
+    its line range tells: a block with n lines of content spans n + 2 lines
+    with a closing fence, n + 1 without. Which line closes a block (its
+    indentation, its container) stays the parser's call.
     """
 
-    unclosed = []
-    for token in tokens:
-        if token.type != 'fence':
-            continue
-        start, end = token.map
-        char, length = token.markup[0], len(token.markup)
-        closing = re.compile(f'{re.escape(char)}{{{length},}}[ \\t]*')
-        last = lines[end - 1].lstrip(' \t>')
-        if end - start < 2 or not closing.fullmatch(last):
-            unclosed.append(start)
-    return unclosed
+    return [
+        token.map[0]
+        for token in tokens
+        if token.type == 'fence'
+        and token.map[1] - token.map[0] == token.content.count('\n') + 1
+    ]
 
 
 def section(changelog: str, version: str) -> str:
@@ -100,12 +100,12 @@ def section(changelog: str, version: str) -> str:
         is_last = position + 1 == len(headings)
         end = len(lines) if is_last else headings[position + 1][1][0]
         body = lines[start:end]
-        if unclosed_fences(parse('\n'.join(body))[0], body):
+        if unclosed_fences(parse('\n'.join(body))[0]):
             raise NotesError(f"a code block in '## [{version}]' is never closed")
         if is_last:
             body = without_the_link_block(body)
         return '\n'.join(body).strip('\n')
-    if unclosed_fences(tokens, lines):
+    if unclosed_fences(tokens):
         raise NotesError(
             f"no '## [{version}]' section in the changelog; a code block "
             'before it is never closed'
