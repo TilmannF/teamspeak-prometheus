@@ -42,10 +42,35 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    git push origin vX.Y.Z
    ```
 
-4. `.github/workflows/release.yml` does the rest: builds and pushes the
-   multi-arch image to GHCR (and to Docker Hub, if `DOCKERHUB_USERNAME` and
-   `DOCKERHUB_TOKEN` are configured as repository secrets), attests build
-   provenance, and creates a GitHub Release with generated notes.
+4. `.github/workflows/release.yml` does the rest:
+   - builds the multi-arch image (amd64, arm64) once and pushes it to GHCR and
+     Docker Hub — Docker Hub if the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+     repository secrets are set, which they are;
+   - attests build provenance and attaches an SBOM;
+   - syncs the README to the Docker Hub description, relative links made
+     absolute;
+   - creates the GitHub Release with the version's `CHANGELOG.md` section as
+     its notes. `.github/scripts/changelog_section.py` extracts it and refuses
+     a section with a link that needs a definition from elsewhere in the
+     changelog — it would render as plain brackets — or a code block left
+     open, which would swallow the rest. It parses the Markdown with
+     `markdown-it-py`, a CommonMark parser, rather than guessing with
+     patterns: the section is parsed alone and with the changelog's other
+     definitions, and a link only the second parse has is a broken one. It
+     runs before anything is published.
+
+     The parser is release tooling only, never a runtime dependency. The
+     workflow installs it into its own environment from
+     `requirements-release.txt`: exact versions, wheels only, every file
+     checked against its hash, nothing resolved beyond the list. Dependabot
+     updates the pins and hashes; `tests/test_release_workflow.py` fails if a
+     pin loses its hash or the parser gains a dependency the list lacks.
+
+   Run `.venv/bin/python .github/scripts/changelog_section.py vX.Y.Z` locally
+   (after `make setup`, which installs the parser) to preview the notes.
+
+   The Docker Hub token is a personal access token (Read & Write) created at
+   hub.docker.com → Account settings → Personal access tokens.
 
 To prove the build without publishing anything, start the workflow manually
 (`workflow_dispatch`, "Run workflow" in the Actions tab). A manual run is a
@@ -56,6 +81,7 @@ passed the check in step 3; only that job has write permissions.
 
 To retry a release that failed after the tag was pushed, re-run the original
 tag-push run ("Re-run jobs"). That run is a tag push again, so the tag is
-validated again. `tests/test_release.py` fails if any publishing step could
-run without a validated tag push, if any job other than `release` could write,
-or if any workflow's checkout leaves the Git token in `.git/config`.
+validated again. `tests/test_release_workflow.py` and
+`tests/test_workflow_hygiene.py` fail if any publishing step could run without
+a validated tag push, if any job other than `release` could write, or if any
+workflow's checkout leaves the Git token in `.git/config`.

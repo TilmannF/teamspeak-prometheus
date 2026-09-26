@@ -45,7 +45,7 @@ Code lives in the package `teamspeak_prometheus`, one module per domain (see `do
 
 Every module MUST stay importable without side effects. The test suite imports them directly.
 
-A module SHOULD stay under 300 lines and MUST NOT exceed 400; split it by responsibility before it does. `tests/test_structure.py` enforces the hard limit.
+A module SHOULD stay under 300 lines and MUST NOT exceed 400; split it by responsibility before it does. This applies to test modules too. `tests/test_structure.py` enforces the hard limit for the package and `tests/`.
 
 All logging MUST go through `teamspeak_prometheus.logs.log`. No module may create its own logger: the redaction filter sits on that one logger and does not reach child loggers.
 

@@ -25,26 +25,54 @@ make run-fake RUN_FAKE_ARGS="--virtualservers 6 --flood-limit 10"
 
 ## Layout
 
+Support code (not collected by pytest):
+
 | File | Purpose |
 | --- | --- |
 | `tests/fixtures/ts3-3.13.8-*.bin` | Raw bytes captured from a real TeamSpeak 3.13.8 server |
 | `tests/serverquery.py` | Independent reference encoder: escaping, framing, records |
-| `tests/fake_ts3_server.py` | Threaded TCP ServerQuery stub: N virtualservers, flood protection, hostile mode |
+| `tests/fake_ts3_server.py` | Threaded TCP ServerQuery stub: N virtualservers, flood protection, stopped servers, hostile mode |
 | `tests/exporter_harness.py` | Runs the real exporter against the fake server |
-| `tests/fakes.py` | In-process fake client and scripted connection — no sockets |
-| `tests/test_serverquery.py` | Reference encoder round-trips |
-| `tests/test_client.py` | `ServerQueryClient` against scripted bytes and the real captures |
-| `tests/test_structure.py` | Module size limit, thin entry points, exactly one logger |
-| `tests/test_output.py` | Scans every log call for a template built at runtime; `printable()` for printed lines |
-| `tests/test_logging.py` | `RedactingFilter`: password censoring, forged-line escaping, a hostile server |
-| `tests/test_cli.py` | Flags as strings, argparse error masking in the exporter and the test tools, `main()` never printing the password, a repository scan for unmasked parsers |
-| `tests/test_release.py` | `__version__` and CHANGELOG agree; the release-tag script accepts only matching `vX.Y.Z`; in `release.yml`, only a validated tag push can log in, push, attest or release |
-| `tests/test_config.py` | Defaults, environment precedence, validation, override warnings |
-| `tests/test_metrics.py` | The metric contract: names, prefix, label, values, self-metrics |
-| `tests/test_service.py` | Poll sequence, error survival, series lifecycle, backoff |
-| `tests/test_smoke.py` | Subprocess boot → scrape `/metrics`, flood and outage survival, healthcheck probe, `python app.py` against a hostile server |
-| `tests/test_healthcheck.py` | `healthcheck.py` against a fake `/proc`: finding the exporter, port resolution, no secret leaks |
-| `tests/container_test.sh` | The built image: `HEALTHCHECK` in every port configuration and a clean `docker stop`, via `make docker-test` |
+| `tests/fakes.py` | In-process fake client, scripted connection, fake clock — no sockets |
+| `tests/conftest.py` | Shared fixtures: registries, `exporter`, `trickling_server`, `clean_env` |
+| `tests/*_support.py` | Helpers shared by the tests of one area (smoke, service, cli, client, release) |
+| `tests/container_test.sh` | The built image: `HEALTHCHECK` in every port configuration, image contents, a clean `docker stop` — `make docker-test` |
+
+Unit tests:
+
+| File | What it checks |
+| --- | --- |
+| `test_serverquery.py` | Reference encoder round-trips |
+| `test_client.py` | `ServerQueryClient`: protocol, login, flood protection, escaping — against scripted bytes and the real captures |
+| `test_client_limits.py` | What a server can make a session cost: deadline, line and byte limits, the growing budget, malformed trailers |
+| `test_config.py` | Defaults, environment precedence, validation, override warnings |
+| `test_cli_errors.py` | Everything argparse prints — errors, usage, `--help` — masks values and censors passwords |
+| `test_cli_config.py` | Flags as strings, the password list, `main()` handing it to every censor |
+| `test_cli_scan.py` | Repository scans: no unmasked parser, every tool that sees a password leak-tested; the test tools checked like the exporter |
+| `test_metrics.py` | The metric contract: names, prefix, label, values, self-metrics, label length |
+| `test_service.py` | One poll: sequence, error survival, what it censors, its clocks |
+| `test_service_virtualservers.py` | Stopped, removed, renamed and same-named virtualservers; missing fields |
+| `test_service_snapshot.py` | A poll records all of its readings or none; the staged snapshot stays small |
+| `test_loop.py` | Interval start to start, backoff and its cap |
+| `test_logging.py` | `RedactingFilter`: censoring, forged-line escaping, `redact()` guarantees, fuzzing |
+| `test_output.py` | Every log template a literal; forwarded templates checked at their call sites; `printable()` |
+| `test_healthcheck.py` | `healthcheck.py` against a fake `/proc`: finding the exporter, its environment, port resolution, no leaks |
+| `test_structure.py` | Module size limit (package and tests), thin entry points, exactly one logger |
+| `test_release_tag.py` | `__version__`, CHANGELOG and the tag check agree |
+| `test_release_workflow.py` | `release.yml`: only a validated tag push publishes, least privilege, notes, Docker Hub page, manual runs; the notes parser pinned, hashed and isolated |
+| `test_release_notes.py` | Release notes from one CHANGELOG section: no link that breaks once lifted out |
+| `test_release_notes_markdown.py` | The notes read Markdown as Markdown: fenced code, containers, headings, what only looks like a link |
+| `test_workflow_hygiene.py` | No persisted tokens, the default branch, Dependabot keeping version ranges |
+
+Smoke tests (subprocesses and sockets, `make test-smoke`):
+
+| File | What it checks |
+| --- | --- |
+| `test_smoke_exporter.py` | The exporter against the fake server: serving, flood, outages, stopped and huge virtualservers, SIGTERM |
+| `test_smoke_cli.py` | Bad command lines, overridden and empty configuration, forged output lines, the loopback-only harness |
+| `test_smoke_secrets.py` | `python app.py` against the hostile server: no password in log or `/metrics` |
+| `test_smoke_leaks.py` | Every command-line tool against colliding passwords — `tool_cases()` |
+| `test_smoke_healthcheck.py` | The healthcheck probe against live and closed endpoints, behind a proxy |
 
 ## Markers
 
@@ -102,12 +130,16 @@ and be killed after Docker's 10-second grace period (exit code 137).
 
 ## No tool prints its password
 
-`tests/test_smoke.py::test_no_tool_prints_its_password` runs every command-line
+`tests/test_smoke_leaks.py::test_no_tool_prints_its_password` runs every command-line
 tool — the exporter, the healthcheck, the harness, the fake server — with
 awkward passwords: equal to a port the tool prints, starting with `-`, after a
 mistyped flag, equal to a flag name, or equal to (or inside) the censoring
 marker `*censored*` itself. No output may contain the password. **A new
-command-line tool gets a row in `tool_cases()`.**
+command-line tool that takes or reads a password gets a row in
+`tool_cases()`.** `tests/test_cli_scan.py` finds every tool in the repository
+(`__main__` guard or shebang, `.github/scripts/` included) and fails on one
+that mentions a password or imports the package without a row. The release
+scripts never see a password, so they have none.
 
 ## Adding a metric
 

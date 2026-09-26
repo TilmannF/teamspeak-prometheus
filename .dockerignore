@@ -10,6 +10,7 @@ policies/
 Makefile
 pyproject.toml
 requirements-dev.txt
+requirements-release.txt
 grafana-dashboard.json
 # ** reaches into subdirectories (the package); a bare pattern only matches
 # at the top level.
