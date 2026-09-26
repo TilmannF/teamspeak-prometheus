@@ -50,12 +50,13 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    - syncs the README to the Docker Hub description, relative links made
      absolute;
    - creates the GitHub Release with the version's `CHANGELOG.md` section as
-     its notes. `.github/scripts/changelog-section.sh` extracts it and refuses
-     a section whose reference links are defined outside it, since those would
-     render broken; it runs before anything is published.
+     its notes. `.github/scripts/changelog_section.py` extracts it and refuses
+     a section that references a link defined elsewhere in the changelog — in
+     any Markdown form, full, collapsed or shortcut — since those would render
+     as plain brackets; it runs before anything is published.
 
-   Run `.github/scripts/changelog-section.sh vX.Y.Z` locally to preview the
-   notes.
+   Run `python3 .github/scripts/changelog_section.py vX.Y.Z` locally to
+   preview the notes.
 
    The Docker Hub token is a personal access token (Read & Write) created at
    hub.docker.com → Account settings → Personal access tokens.

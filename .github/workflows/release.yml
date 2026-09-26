@@ -31,6 +31,14 @@ jobs:
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      # The release job extracts the notes only once a tag is public; a manual
+      # run previews them for the version in the code, so a changelog section
+      # that would fail is caught before tagging.
+      - name: Preview the release notes from CHANGELOG.md
+        run: |
+          version="$(sed -n "s/^__version__ = '\(.*\)'\$/\1/p" teamspeak_prometheus/__init__.py)"
+          python3 .github/scripts/changelog_section.py "v$version"
+
       # Nothing else exercises metadata-action before a real release depends
       # on it (CI never runs this file), so a manual run computes the tags
       # too: an action update breaks here, not on the day of a release. The
@@ -105,7 +113,7 @@ jobs:
       - name: Take the release notes from CHANGELOG.md
         env:
           TAG: ${{ github.ref_name }}
-        run: .github/scripts/changelog-section.sh "$TAG" > "$RUNNER_TEMP/release-notes.md"
+        run: python3 .github/scripts/changelog_section.py "$TAG" > "$RUNNER_TEMP/release-notes.md"
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
