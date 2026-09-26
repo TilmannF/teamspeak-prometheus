@@ -198,6 +198,7 @@ def test_the_tag_check_runs_on_every_tag_push():
         'docker/login-action',
         'actions/attest-build-provenance',
         'softprops/action-gh-release',
+        'peter-evans/dockerhub-description',
     ],
 )
 def test_publishing_steps_run_only_on_a_tag_push_after_the_check(publishing):
@@ -369,3 +370,101 @@ def test_the_runtime_floor_is_still_the_tested_one():
 
     assert 'prometheus_client>=0.7.1,<1.0' in requirements
     assert '0.7.1' in requirements.split('prometheus_client')[0]
+
+
+# -- release notes and the Docker Hub page ---------------------------------------
+
+NOTES_SCRIPT = ROOT / '.github' / 'scripts' / 'changelog-section.sh'
+
+
+def test_release_notes_come_from_the_changelog_before_anything_is_published():
+    (notes,) = index_of(
+        lambda s: s.get('name') == 'Take the release notes from CHANGELOG.md'
+    )
+    publishing = index_of(
+        lambda s: any(
+            uses(action)(s)
+            for action in ('docker/login-action', 'docker/build-push-action')
+        )
+    )
+
+    assert 'changelog-section.sh "$TAG"' in steps()[notes]['run']
+    assert notes < min(publishing)
+    (release,) = index_of(uses('softprops/action-gh-release'))
+    assert steps()[release]['with'] == {
+        'body_path': '${{ runner.temp }}/release-notes.md'
+    }
+
+
+def test_the_docker_hub_page_is_synced_only_with_credentials_after_the_push():
+    (sync,) = index_of(uses('peter-evans/dockerhub-description'))
+    (build,) = index_of(uses('docker/build-push-action'))
+    step = steps()[sync]
+
+    assert sync > build
+    assert "steps.dockerhub.outputs.enabled == 'true'" in step['if']
+    assert step['with']['repository'] == 'tilmannf/teamspeak-prometheus'
+    assert step['with']['enable-url-completion'] is True
+
+
+def test_a_manual_run_exercises_metadata_action_without_logging_in():
+    build = jobs()['build']['steps']
+
+    assert any(uses('docker/metadata-action')(s) for s in build)
+    assert not any(uses('docker/login-action')(s) for s in build)
+
+
+def notes(tmp_path: Path, changelog: str, version: str = '1.0.0'):
+    (tmp_path / 'CHANGELOG.md').write_text(changelog)
+    return subprocess.run(
+        ['sh', str(NOTES_SCRIPT), version, str(tmp_path / 'CHANGELOG.md')],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
+@pytest.mark.smoke
+def test_the_real_changelog_yields_notes_for_the_version():
+    result = subprocess.run(
+        ['sh', str(NOTES_SCRIPT), f'v{__version__}', str(ROOT / 'CHANGELOG.md')],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert '### Added' in result.stdout
+    assert f'[{__version__}]: https://' not in result.stdout  # end-of-file links
+
+
+@pytest.mark.smoke
+def test_notes_stop_at_the_next_version(tmp_path):
+    result = notes(
+        tmp_path,
+        '# Changelog\n\n## [1.1.0] - 2026-10-01\n\n- newer\n\n'
+        '## [1.0.0] - 2026-09-26\n\n- first\n\n[1.0.0]: https://x\n',
+        '1.1.0',
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == '- newer'
+
+
+@pytest.mark.smoke
+def test_a_missing_section_fails(tmp_path):
+    result = notes(tmp_path, '# Changelog\n\n## [0.9.0]\n\n- old\n')
+
+    assert result.returncode == 1
+    assert "no '## [1.0.0]' section" in result.stderr
+
+
+@pytest.mark.smoke
+def test_a_reference_link_defined_outside_the_section_fails(tmp_path):
+    result = notes(
+        tmp_path,
+        '## [1.0.0]\n\n- see [the docs][docs]\n\n## [0.9.0]\n\n[docs]: https://x\n',
+    )
+
+    assert result.returncode == 1
+    assert 'references [docs]' in result.stderr

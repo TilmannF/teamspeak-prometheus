@@ -9,7 +9,7 @@ the `virtualserver_name` label — is the contract this project's SemVer is
 measured against. A metric rename, removal, re-prefix, or re-label is a major
 version bump. See `AGENTS.md`, "The Metric Contract".
 
-## [1.0.0]
+## [1.0.0] - 2026-09-26
 
 This is the first tagged release of a project that has existed, untagged, for
 six years. It is not a list of changes since a predecessor — there wasn't one.

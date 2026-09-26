@@ -42,10 +42,23 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    git push origin vX.Y.Z
    ```
 
-4. `.github/workflows/release.yml` does the rest: builds and pushes the
-   multi-arch image to GHCR (and to Docker Hub, if `DOCKERHUB_USERNAME` and
-   `DOCKERHUB_TOKEN` are configured as repository secrets), attests build
-   provenance, and creates a GitHub Release with generated notes.
+4. `.github/workflows/release.yml` does the rest:
+   - builds the multi-arch image (amd64, arm64) once and pushes it to GHCR and
+     Docker Hub — Docker Hub if the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+     repository secrets are set, which they are;
+   - attests build provenance and attaches an SBOM;
+   - syncs the README to the Docker Hub description, relative links made
+     absolute;
+   - creates the GitHub Release with the version's `CHANGELOG.md` section as
+     its notes. `.github/scripts/changelog-section.sh` extracts it and refuses
+     a section whose reference links are defined outside it, since those would
+     render broken; it runs before anything is published.
+
+   Run `.github/scripts/changelog-section.sh vX.Y.Z` locally to preview the
+   notes.
+
+   The Docker Hub token is a personal access token (Read & Write) created at
+   hub.docker.com → Account settings → Personal access tokens.
 
 To prove the build without publishing anything, start the workflow manually
 (`workflow_dispatch`, "Run workflow" in the Actions tab). A manual run is a
