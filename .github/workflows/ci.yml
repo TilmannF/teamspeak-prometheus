@@ -72,6 +72,19 @@ jobs:
       - name: make docker-test
         run: make docker-test
 
+      # Scans the image make docker-test just built, as users' scanners would
+      # (1.0.0 shipped pip's vendored msgpack and setuptools). HIGH and
+      # CRITICAL fail the job, which is a required check; a finding with no
+      # fixed version yet does not, as nothing here could act on it. The pin
+      # also fixes the Trivy version: the action's default at that commit.
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: teamspeak-prometheus:dev
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
   dependency-review:
     name: dependency review
     if: github.event_name == 'pull_request'
