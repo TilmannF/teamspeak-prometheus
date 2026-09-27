@@ -164,6 +164,10 @@ jobs:
           images: |
             ${{ steps.ghcr.outputs.image }}
             ${{ steps.dockerhub.outputs.enabled == 'true' && 'docker.io/tilmannf/teamspeak-prometheus' || '' }}
+          # latest is set explicitly below; metadata-action's own
+          # (latest=auto) would add it a second time on a semver tag.
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -188,18 +192,8 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-      # Without this the Docker Hub page stays blank, which looks abandoned.
-      # URL completion turns the README's relative links into absolute
-      # GitHub links, which would otherwise be dead on Docker Hub.
-      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
-        if: github.event_name == 'push' && steps.dockerhub.outputs.enabled == 'true'
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: tilmannf/teamspeak-prometheus
-          short-description: ${{ github.event.repository.description }}
-          enable-url-completion: true
-
+      # The Docker Hub page is not synced here: dockerhub-description.yml
+      # follows README.md on main, so a page problem cannot block a release.
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         if: github.event_name == 'push'
         with:

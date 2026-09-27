@@ -1,0 +1,60 @@
+name: Docker Hub description
+
+# Keeps the Docker Hub page in step with README.md on main. It used to be a
+# step of the release job, where a failed page update blocked the GitHub
+# release after the images were already out (v1.0.0), and the page only
+# changed on a release. It publishes no image and builds nothing.
+#
+# Docker Hub only lets a personal access token with the Read, Write, Delete
+# scope edit a repository's description; Read & Write gets "Forbidden".
+# tests/test_description_workflow.py enforces the rules below.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-description
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: sync README to Docker Hub
+    # A manual run can pick any branch; only main's README is the page.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # secrets.* cannot appear directly in `if:` (see release.yml).
+      - name: Check Docker Hub credentials
+        id: dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # URL completion turns the README's relative links into absolute
+      # GitHub links, which would otherwise be dead on Docker Hub.
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        if: steps.dockerhub.outputs.enabled == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: tilmannf/teamspeak-prometheus
+          short-description: ${{ github.event.repository.description }}
+          enable-url-completion: true

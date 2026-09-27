@@ -59,7 +59,8 @@ Unit tests:
 | `test_healthcheck.py` | `healthcheck.py` against a fake `/proc`: finding the exporter, its environment, port resolution, no leaks |
 | `test_structure.py` | Module size limit (package and tests), thin entry points, exactly one logger |
 | `test_release_tag.py` | `__version__`, CHANGELOG and the tag check agree |
-| `test_release_workflow.py` | `release.yml`: only a validated tag push publishes, least privilege, notes, Docker Hub page, manual runs; the notes parser pinned, hashed and isolated |
+| `test_release_workflow.py` | `release.yml`: only a validated tag push publishes, least privilege, notes, one `latest`, manual runs; the notes parser pinned, hashed and isolated |
+| `test_description_workflow.py` | `dockerhub-description.yml`: only main's README becomes the Docker Hub page, read-only on GitHub, the token nowhere else |
 | `test_release_notes.py` | Release notes from one CHANGELOG section: no link that breaks once lifted out |
 | `test_release_notes_markdown.py` | The notes read Markdown as Markdown: fenced code, containers, headings, what only looks like a link |
 | `test_workflow_hygiene.py` | No persisted tokens, the default branch, Dependabot keeping version ranges |
