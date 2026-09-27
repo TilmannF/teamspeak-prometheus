@@ -5,4 +5,4 @@ The exporter runs from ``app.py``; the container healthcheck from
 docs/architecture.md for the module map.
 """
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'

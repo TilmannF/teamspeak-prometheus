@@ -21,7 +21,8 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
 1. Update `CHANGELOG.md`: move the pending changes into a new `## [X.Y.Z]`
    section, dated, with a link reference at the bottom of the file. Set
    `__version__` in `teamspeak_prometheus/__init__.py` to `X.Y.Z` — it is what
-   `teamspeak_exporter_build_info` reports.
+   `teamspeak_exporter_build_info` reports. Point the pinned image tags in
+   `README.md`'s examples at `X.Y.Z`; the Docker Hub page follows on merge.
 2. Commit that on a branch, get it reviewed and merged to `main` like any
    other change.
 3. From `main`, tag and push. Release tags are exactly `vMAJOR.MINOR.PATCH`

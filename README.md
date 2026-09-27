@@ -40,7 +40,7 @@ it) is held to.
 docker run -d -p 8000:8000 \
   -e TEAMSPEAK_HOST=example.com \
   -e TEAMSPEAK_PASSWORD=example123 \
-  ghcr.io/tilmannf/teamspeak-prometheus:1.0.0
+  ghcr.io/tilmannf/teamspeak-prometheus:1.0.1
 ```
 
 Or from Docker Hub:
@@ -49,7 +49,7 @@ Or from Docker Hub:
 docker run -d -p 8000:8000 \
   -e TEAMSPEAK_HOST=example.com \
   -e TEAMSPEAK_PASSWORD=example123 \
-  tilmannf/teamspeak-prometheus:1.0.0
+  tilmannf/teamspeak-prometheus:1.0.1
 ```
 
 Pin a version tag in anything beyond local experimentation — see
@@ -116,7 +116,7 @@ the ban expires (default 10 minutes).
 ```yaml
 services:
   teamspeak-prometheus:
-    image: tilmannf/teamspeak-prometheus:1.0.0
+    image: tilmannf/teamspeak-prometheus:1.0.1
     environment:
       TEAMSPEAK_HOST: example.com
       TEAMSPEAK_PASSWORD: example123

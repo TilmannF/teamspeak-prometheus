@@ -9,6 +9,23 @@ the `virtualserver_name` label — is the contract this project's SemVer is
 measured against. A metric rename, removal, re-prefix, or re-label is a major
 version bump. See `AGENTS.md`, "The Metric Contract".
 
+## [1.0.1] - 2026-09-27
+
+An image-hygiene release. The exporter itself is unchanged.
+
+### Security
+
+- pip is no longer in the image. The exporter never ran it, but image scanners
+  flagged the packages it vendors: msgpack 1.1.2
+  ([GHSA-6v7p-g79w-8964](https://github.com/advisories/GHSA-6v7p-g79w-8964),
+  high) and setuptools 70.3.0
+  ([CVE-2025-47273](https://avd.aquasec.com/nvd/cve-2025-47273), high;
+  [CVE-2026-59890](https://avd.aquasec.com/nvd/cve-2026-59890), medium). None
+  was reachable from the exporter or the healthcheck. Anything that installed
+  packages into the running container with pip has to use its own image now.
+- Every pull request's image is scanned with Trivy in CI; a high or critical
+  finding with a fix available fails the build.
+
 ## [1.0.0] - 2026-09-26
 
 This is the first tagged release of a project that has existed, untagged, for
@@ -113,4 +130,5 @@ It is the state as shipped: what a user gets if they pull this tag today.
   because `virtualserver_name` is the only label (see
   `docs/modernization-backlog.md`).
 
+[1.0.1]: https://github.com/TilmannF/teamspeak-prometheus/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TilmannF/teamspeak-prometheus/releases/tag/v1.0.0
