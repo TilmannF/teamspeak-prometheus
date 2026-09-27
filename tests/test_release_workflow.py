@@ -1,5 +1,5 @@
 """The release workflow: only a validated tag push publishes, with
-least privilege; notes, Docker Hub page and manual runs.
+least privilege; notes, tags and manual runs.
 """
 
 from __future__ import annotations
@@ -58,7 +58,6 @@ def test_the_tag_check_runs_on_every_tag_push():
         'docker/login-action',
         'actions/attest-build-provenance',
         'softprops/action-gh-release',
-        'peter-evans/dockerhub-description',
     ],
 )
 def test_publishing_steps_run_only_on_a_tag_push_after_the_check(publishing):
@@ -86,6 +85,18 @@ def test_latest_is_tagged_only_on_a_tag_push():
         f'type=raw,value=latest,enable=${{{{ {TAG_PUSH} }}}}'
         in (steps()[meta]['with']['tags'])
     )
+
+
+def test_latest_is_tagged_once():
+    # metadata-action's default flavor (latest=auto) adds latest for every
+    # type=semver tag by itself: with the explicit line above, v1.0.0 listed
+    # it twice
+    (meta,) = index_of(uses('docker/metadata-action'))
+    options = steps()[meta]['with']
+    flavor = options.get('flavor', '').split()
+
+    assert 'latest=false' in flavor
+    assert sum('value=latest' in line for line in options['tags'].splitlines()) == 1
 
 
 def test_the_workflow_grants_nothing_but_read_by_default():
@@ -150,15 +161,21 @@ def test_release_notes_come_from_the_changelog_before_anything_is_published():
     }
 
 
-def test_the_docker_hub_page_is_synced_only_with_credentials_after_the_push():
-    (sync,) = index_of(uses('peter-evans/dockerhub-description'))
+def test_nothing_between_the_push_and_the_release_can_block_it_needlessly():
+    # v1.0.0: a Docker Hub page update failed after the images were out, and
+    # the GitHub release was skipped. The page has its own workflow now.
     (build,) = index_of(uses('docker/build-push-action'))
-    step = steps()[sync]
+    (release,) = index_of(uses('softprops/action-gh-release'))
+    between = [
+        steps()[i].get('uses', '').split('@')[0] for i in range(build + 1, release)
+    ]
 
-    assert sync > build
-    assert "steps.dockerhub.outputs.enabled == 'true'" in step['if']
-    assert step['with']['repository'] == 'tilmannf/teamspeak-prometheus'
-    assert step['with']['enable-url-completion'] is True
+    assert between == ['actions/attest-build-provenance']
+    assert not any(
+        'dockerhub-description' in str(step)
+        for job in jobs().values()
+        for step in job['steps']
+    )
 
 
 def test_a_manual_run_exercises_metadata_action_without_logging_in():

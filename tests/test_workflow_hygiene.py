@@ -15,6 +15,7 @@ def test_every_workflow_is_scanned():
         'release.yml',
         'codeql.yml',
         'scorecard.yml',
+        'dockerhub-description.yml',
     }
 
 

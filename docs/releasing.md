@@ -47,8 +47,6 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
      Docker Hub — Docker Hub if the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
      repository secrets are set, which they are;
    - attests build provenance and attaches an SBOM;
-   - syncs the README to the Docker Hub description, relative links made
-     absolute;
    - creates the GitHub Release with the version's `CHANGELOG.md` section as
      its notes. `.github/scripts/changelog_section.py` extracts it and refuses
      a section with a link that needs a definition from elsewhere in the
@@ -69,8 +67,12 @@ environment variables, and ports documented in `README.md`. See `AGENTS.md`,
    Run `.venv/bin/python .github/scripts/changelog_section.py vX.Y.Z` locally
    (after `make setup`, which installs the parser) to preview the notes.
 
-   The Docker Hub token is a personal access token (Read & Write) created at
-   hub.docker.com → Account settings → Personal access tokens.
+   The Docker Hub token is a personal access token with the **Read, Write,
+   Delete** scope, created at hub.docker.com → Account settings → Personal
+   access tokens. Pushing needs only Read & Write, but the Docker Hub page
+   (below) cannot be edited without Delete: Docker Hub answers "Forbidden".
+   A token's scope cannot be changed afterwards; create a new one and replace
+   the `DOCKERHUB_TOKEN` secret.
 
 To prove the build without publishing anything, start the workflow manually
 (`workflow_dispatch`, "Run workflow" in the Actions tab). A manual run is a
@@ -79,9 +81,29 @@ registry, pushes, attests, or creates a release, and never holds a write
 token. Publishing happens only in the `release` job, for a pushed tag that
 passed the check in step 3; only that job has write permissions.
 
-To retry a release that failed after the tag was pushed, re-run the original
-tag-push run ("Re-run jobs"). That run is a tag push again, so the tag is
-validated again. `tests/test_release_workflow.py` and
-`tests/test_workflow_hygiene.py` fail if any publishing step could run without
-a validated tag push, if any job other than `release` could write, or if any
-workflow's checkout leaves the Git token in `.git/config`.
+To retry a release that failed before the images were pushed, re-run the
+original tag-push run ("Re-run jobs"). That run is a tag push again, so the
+tag is validated again. Once the images are pushed, do not re-run: the job
+builds again, and the version's tags would point to a new image under
+everyone who already pulled them. Finish the missing steps by hand instead
+— for the GitHub release, with the notes the workflow would have used:
+
+```bash
+.venv/bin/python .github/scripts/changelog_section.py vX.Y.Z > notes.md
+gh release create vX.Y.Z --verify-tag --title vX.Y.Z --notes-file notes.md --latest
+```
+
+`tests/test_release_workflow.py` and `tests/test_workflow_hygiene.py` fail if
+any publishing step could run without a validated tag push, if any job other
+than `release` could write, or if any workflow's checkout leaves the Git token
+in `.git/config`.
+
+## The Docker Hub page
+
+`.github/workflows/dockerhub-description.yml` sends `README.md` to the Docker
+Hub page, relative links made absolute, whenever `README.md` changes on
+`main` — or when started by hand (Actions → Docker Hub description → Run
+workflow), which only works on `main`. It is not part of a release: the page
+follows the README, and a failed page update cannot stop a release. For
+v1.0.0 it did: the step sat between the image push and the GitHub release,
+failed on a Read & Write token, and the release had to be created by hand.
