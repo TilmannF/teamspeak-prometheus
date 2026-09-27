@@ -36,7 +36,7 @@ Support code (not collected by pytest):
 | `tests/fakes.py` | In-process fake client, scripted connection, fake clock — no sockets |
 | `tests/conftest.py` | Shared fixtures: registries, `exporter`, `trickling_server`, `clean_env` |
 | `tests/*_support.py` | Helpers shared by the tests of one area (smoke, service, cli, client, release) |
-| `tests/container_test.sh` | The built image: `HEALTHCHECK` in every port configuration, image contents, a clean `docker stop` — `make docker-test` |
+| `tests/container_test.sh` | The built image: `HEALTHCHECK` in every port configuration, image contents (no pip), a clean `docker stop` — `make docker-test`. CI then scans the same image with Trivy |
 
 Unit tests:
 
@@ -60,6 +60,7 @@ Unit tests:
 | `test_structure.py` | Module size limit (package and tests), thin entry points, exactly one logger |
 | `test_release_tag.py` | `__version__`, CHANGELOG and the tag check agree |
 | `test_release_workflow.py` | `release.yml`: only a validated tag push publishes, least privilege, notes, one `latest`, manual runs; the notes parser pinned, hashed and isolated |
+| `test_ci_workflow.py` | `ci.yml`: the required checks keep their names, the PR image is scanned (HIGH/CRITICAL with a fix fail), actions SHA-pinned, read-only |
 | `test_description_workflow.py` | `dockerhub-description.yml`: only main's README becomes the Docker Hub page, read-only on GitHub, the token nowhere else |
 | `test_release_notes.py` | Release notes from one CHANGELOG section: no link that breaks once lifted out |
 | `test_release_notes_markdown.py` | The notes read Markdown as Markdown: fenced code, containers, headings, what only looks like a link |

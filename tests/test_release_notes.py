@@ -28,7 +28,7 @@ NotesError = notes_module.NotesError
 def test_the_real_changelog_yields_notes_for_the_version():
     notes = release_notes((ROOT / 'CHANGELOG.md').read_text(), f'v{__version__}')
 
-    assert '### Added' in notes
+    assert '\n### ' in f'\n{notes}'  # Added, Security, ...: any section kind
     assert f'[{__version__}]: https://' not in notes  # the end-of-file link block
 
 
@@ -180,5 +180,5 @@ def test_the_script_prints_the_notes_and_fails_loudly(tmp_path):
         timeout=10,
     )
 
-    assert ok.returncode == 0 and '### Added' in ok.stdout
+    assert ok.returncode == 0 and '\n### ' in f'\n{ok.stdout}'
     assert missing.returncode == 1 and "no '## [1.0.0]' section" in missing.stderr

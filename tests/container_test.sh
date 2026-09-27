@@ -137,6 +137,20 @@ else
   FAILED=1
 fi
 
+# No pip: the exporter never runs it, and its vendored packages are what image
+# scanners flag. Neither the module, a command, nor its metadata may be left.
+pip_found="$(docker run --rm --entrypoint sh "$IMAGE" -c '
+  python -c "import importlib.util; print(importlib.util.find_spec(\"pip\") or \"\")"
+  find / -xdev \( -path "*/site-packages/pip" -o -path "*/site-packages/pip-*" \
+    -o -path "*/bin/pip" -o -path "*/bin/pip[0-9]*" \) -prune -print 2>/dev/null
+  true' | tr -s "\n" " ")"
+if [[ -z "${pip_found// /}" ]]; then
+  echo "ok   image contents: no pip"
+else
+  echo "FAIL image contents: pip is installed: $pip_found"
+  FAILED=1
+fi
+
 # stopped NAME: docker stop must finish fast with exit code 0 and a clean log.
 stopped() {
   local name="$PREFIX-$1" started elapsed code
